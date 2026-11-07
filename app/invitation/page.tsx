@@ -55,7 +55,7 @@ export default function InvitationPage() {
 
   return <main className="letter-page" ref={page}>
     <button type="button" className="back-link" onClick={() => {
-      if (accepted) window.location.replace("/");
+      if (accepted) router.replace("/");
       else if (continued) setContinued(false);
       else router.back();
     }}>← Буцах</button>
@@ -181,23 +181,3 @@ export default function InvitationPage() {
     `}</style>
   </main>;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
