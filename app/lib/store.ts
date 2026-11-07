@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { defaultSettings, type GuestResponse, type SettingsDocument, type SiteSettings } from "./site-settings";
+import { defaultSettings, withoutBundledMedia, type GuestResponse, type SettingsDocument, type SiteSettings } from "./site-settings";
 import { cloudEnabled, cloudTransaction, readCloud } from "./firebase-server";
 import * as local from "./local-store";
 export { dataDirectory, uploadDirectory, exclusive } from "./local-store";
@@ -20,14 +20,14 @@ export async function writeJson(name: string, value: unknown) {
   }
   throw new Error("Transaction ашиглан хадгална уу.");
 }
-export async function readSettings(): Promise<SettingsDocument> { return readJson("settings.json", defaultDocument()); }
+export async function readSettings(): Promise<SettingsDocument> { const document = await readJson("settings.json", defaultDocument()); return { ...document, settings: withoutBundledMedia(document.settings) }; }
 export async function saveSettings(settings: SiteSettings, revision: number): Promise<SettingsDocument | null> {
   const update = (current: SettingsDocument | null) => {
     const previous = current ?? defaultDocument();
     if (previous.revision !== revision) return undefined;
-    return {settings, revision: previous.revision + 1, updatedAt: new Date().toISOString()};
+    return {settings: withoutBundledMedia(settings), revision: previous.revision + 1, updatedAt: new Date().toISOString()};
   };
-  if (cloudEnabled()) { const result = await cloudTransaction<SettingsDocument>("settings", update); return result.committed ? result.value : null; }
+  if (cloudEnabled()) { const result = await cloudTransaction<SettingsDocument>("settings", update); return result.committed && result.value ? { ...result.value, settings: withoutBundledMedia(result.value.settings) } : null; }
   return local.exclusive(async () => { const next = update(await local.readSettings()); if (!next) return null; await local.writeJson("settings.json", next); return next; });
 }
 export async function readResponses(): Promise<GuestResponse[]> {
@@ -58,3 +58,5 @@ export async function saveGuestResponse(value: { id: string; name: string; messa
     if (next) await local.writeJson("responses.json", Object.values(next));
   });
 }
+
+
