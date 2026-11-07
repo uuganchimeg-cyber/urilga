@@ -1,10 +1,10 @@
 import { type NextRequest } from "next/server";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { json, sameOrigin } from "../../lib/admin-auth";
+import { json, requireAdmin, sameOrigin } from "../../lib/admin-auth";
 import { cloudEnabled, cloudTransaction, readCloud } from "../../lib/firebase-server";
-import { mediaExtension, uploadCloudMedia } from "../../lib/cloudinary-server";
+import { allowedCloudinaryUrl, mediaExtension, uploadCloudMedia } from "../../lib/cloudinary-server";
 import { exclusive, readJson, uploadDirectory, writeJson } from "../../lib/local-store";
 
 type Photo = { id: string; url: string; createdAt: string };
@@ -17,9 +17,14 @@ const readAlbum = async () => cloudEnabled()
   : readJson<Album>("guest-photos.json", {});
 
 export async function GET(request: NextRequest) {
-  request.headers.get("host");
+  const downloadId = request.nextUrl.searchParams.get("download");
   try {
-    const photos = Object.values(await readAlbum());
+    const album = await readAlbum();
+    if (downloadId !== null) {
+      if (!/^[a-f0-9]{64}$/.test(downloadId) || !album[downloadId]) return json({ error: "Зураг олдсонгүй." }, 404);
+      return await downloadPhoto(album[downloadId]);
+    }
+    const photos = Object.values(album);
     return json(photos.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
   } catch {
     return json({ error: "Зочдын зургийг ачаалж чадсангүй." }, 503);
@@ -70,5 +75,49 @@ export async function POST(request: NextRequest) {
     });
   } catch {
     return json({ error: "Зургийг хадгалж чадсангүй. Дахин оролдоно уу." }, 503);
+  }
+}
+
+
+async function downloadPhoto(photo: Photo) {
+  const extension = /\.(jpg|jpeg|png|webp)$/i.exec(photo.url)?.[1]?.toLowerCase();
+  if (!extension) return json({ error: "Зургийн формат тохирохгүй байна." }, 404);
+  const headers = {
+    "Content-Disposition": `attachment; filename="guest-${photo.id.slice(0, 12)}.${extension}"`,
+    "Content-Type": extension === "jpg" ? "image/jpeg" : `image/${extension}`,
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+  };
+  const localFile = /^\/api\/media\/([a-f0-9-]{36}\.(?:jpg|png|webp))$/.exec(photo.url);
+  if (localFile) {
+    const bytes = await readFile(/* turbopackIgnore: true */ path.join(/* turbopackIgnore: true */ uploadDirectory, localFile[1]));
+    return new Response(new Uint8Array(bytes), { headers });
+  }
+  if (!allowedCloudinaryUrl(photo.url)) return json({ error: "Зургийн холбоос буруу байна." }, 404);
+  const upstream = await fetch(photo.url, { redirect: "error", signal: AbortSignal.timeout(20000) });
+  if (!upstream.ok || !upstream.body) return json({ error: "Зургийг татаж чадсангүй." }, 502);
+  return new Response(upstream.body, { headers });
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const denied = await requireAdmin(request);
+    if (denied) return denied;
+    const id = request.nextUrl.searchParams.get("id");
+    if (!id || !/^[a-f0-9]{64}$/.test(id)) return json({ error: "Зургийн дугаар буруу байна." }, 400);
+    function remove(current: Album | null) {
+      if (!current || !Object.hasOwn(current, id!)) return undefined;
+      const remaining = { ...current };
+      delete remaining[id!];
+      return remaining;
+    }
+    if (cloudEnabled()) await cloudTransaction<Album>(albumPath, remove);
+    else await exclusive(async () => {
+      const remaining = remove(await readAlbum());
+      if (remaining) await writeJson("guest-photos.json", remaining);
+    });
+    return json({ ok: true });
+  } catch {
+    return json({ error: "Зургийг цомгоос хасаж чадсангүй." }, 503);
   }
 }
