@@ -7,7 +7,11 @@ const size = 48;
 const margin = 12;
 
 export default function MusicPlayer() {
-  const settings = useSiteSettings();
+  const { music } = useSiteSettings();
+  return music ? <AudioPlayer src={music} /> : null;
+}
+
+function AudioPlayer({ src }: { src: string }) {
   const audio = useRef<HTMLAudioElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const userPaused = useRef(false);
@@ -35,7 +39,7 @@ export default function MusicPlayer() {
     window.addEventListener("keydown", firstGesture);
     window.addEventListener("resize", resize);
     return () => { window.removeEventListener("pointerdown", firstGesture); window.removeEventListener("keydown", firstGesture); window.removeEventListener("resize", resize); };
-  }, [settings.music]);
+  }, [src]);
   function toggle() {
     if (suppressClick.current) { suppressClick.current = false; return; }
     const player = audio.current;
@@ -45,7 +49,7 @@ export default function MusicPlayer() {
   }
   const label = error ? "Дуу ачаалж чадсангүй. Дахин оролдох" : playing ? "Дууг зогсоох" : "Дууг тоглуулах";
   return <>
-    <audio ref={audio} src={settings.music} autoPlay loop preload="auto" onPlay={() => { setPlaying(true); setBlocked(false); setError(false); }} onPause={() => setPlaying(false)} onError={() => { setError(true); setPlaying(false); }} />
+    <audio ref={audio} src={src} autoPlay loop preload="auto" onPlay={() => { setPlaying(true); setBlocked(false); setError(false); }} onPause={() => setPlaying(false)} onError={() => { setError(true); setPlaying(false); }} />
     <button ref={button} type="button" className={`music-button ${playing ? "is-playing" : ""}`} aria-label={label} aria-pressed={playing} title={`${label} · Чирж зөөнө`} style={position ? { left: position.x, top: position.y, right: "auto", bottom: "auto" } : undefined}
       onClick={toggle}
       onPointerDown={event => {
@@ -86,4 +90,5 @@ export default function MusicPlayer() {
     `}</style>
   </>;
 }
+
 
