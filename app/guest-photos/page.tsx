@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import ZoomablePhoto from "../zoomable-photo";
 import Link from "next/link";
 import GuestPhotoButton from "../guest-photo-button";
 import { useEffect, useRef, useState } from "react";
@@ -155,7 +156,7 @@ export default function GuestPhotosPage() {
     ) : !error && <p className="empty">Одоогоор зураг ороогүй байна ♡</p>}
     <dialog ref={viewer} className="viewer" aria-label="Зургийг томоор харах" onClose={() => setSelected(null)}>
       <button type="button" onClick={() => viewer.current?.close()} aria-label="Зургийг хаах">×</button>
-      {selected && <><Image src={selected.url} alt="Зочны оруулсан зураг" fill sizes="100vw" unoptimized loading="eager" /><div className="download"><button type="button" onClick={() => void savePhoto()}>Галерейд хадгалах</button>{manualSave && <a href={selected.url} target="_blank" rel="noopener noreferrer">Зургийг нээгээд удаан дарж хадгалаарай</a>}</div></>}
+      {selected && <><ZoomablePhoto key={selected.id}><Image src={selected.url} alt="Зочны оруулсан зураг" fill sizes="100vw" unoptimized loading="eager" draggable={false} /></ZoomablePhoto><div className="download"><button type="button" onClick={() => void savePhoto()}>Галерейд хадгалах</button>{manualSave && <a href={selected.url} target="_blank" rel="noopener noreferrer">Зургийг нээгээд удаан дарж хадгалаарай</a>}</div></>}
     </dialog>
     <style jsx>{`
       .guest-album{position:fixed;inset:0;height:100dvh;overflow-y:auto;padding:max(18px,env(safe-area-inset-top)) 20px max(28px,env(safe-area-inset-bottom));background:radial-gradient(ellipse at top,#512c44,#24101f 65%);color:#fce5f1;font-family:Manrope,Arial,sans-serif}
@@ -170,4 +171,3 @@ export default function GuestPhotosPage() {
     `}</style>
   </main>;
 }
-
