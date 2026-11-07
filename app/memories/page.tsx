@@ -22,6 +22,13 @@ export default function MemoriesPage() {
   const trigger = useRef<HTMLButtonElement | null>(null);
   const touchX = useRef<number | null>(null);
   const running = playing && selected === null && memories.length > 1;
+  const filmWindow = useRef<HTMLDivElement>(null);
+  const firstFilmGroup = useRef<HTMLDivElement>(null);
+  const filmOffset = useRef(0);
+  const filmWidth = useRef(0);
+  const filmDrag = useRef<{ pointerId: number; x: number; offset: number; moved: boolean } | null>(null);
+  const suppressFilmClick = useRef(false);
+  const [filmCopies, setFilmCopies] = useState(2);
   const ready = useRef(new Set<string>());
   const activeIndex = active % Math.max(1, memories.length);
   const nextIndex = (activeIndex + 1) % Math.max(1, memories.length);
@@ -47,6 +54,44 @@ export default function MemoriesPage() {
   useEffect(() => {
     if (selected !== null && dialog.current && !dialog.current.open) dialog.current.showModal();
   }, [selected]);
+  useEffect(() => {
+    const viewport = filmWindow.current;
+    const group = firstFilmGroup.current;
+    if (!viewport || !group) return;
+    function measure() {
+      const width = group!.offsetWidth;
+      filmWidth.current = width;
+      if (width > 0) setFilmCopies(Math.ceil(viewport!.clientWidth / width) + 2);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    observer.observe(group);
+    measure();
+    return () => observer.disconnect();
+  }, [memories.length]);
+
+  function moveFilm(offset: number) {
+    const width = filmWidth.current;
+    if (!width || !filmWindow.current) return;
+    filmOffset.current = ((offset % width) + width) % width;
+    filmWindow.current.scrollLeft = filmOffset.current;
+  }
+
+  const filmRunning = playing && selected === null && memories.length > 0;
+  useEffect(() => {
+    if (!filmRunning) return;
+    let frame: number;
+    let previous: number | undefined;
+    function tick(now: number) {
+      const elapsed = previous === undefined ? 0 : Math.min(now - previous, 50);
+      previous = now;
+      if (!filmDrag.current && !document.hidden) moveFilm(filmOffset.current + elapsed * 0.032);
+      frame = requestAnimationFrame(tick);
+    }
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [filmRunning]);
+
   function open(index: number, button: HTMLButtonElement) { trigger.current = button; setSelected(index); }
   function close() { dialog.current?.close(); setSelected(null); trigger.current?.focus(); }
   function change(direction: number) { setSelected(index => index === null ? null : (index + direction + memories.length) % memories.length); }
@@ -73,12 +118,41 @@ export default function MemoriesPage() {
       </section>
       <div className="film-section">
         <div className="film-heading"><span>БҮХ ДУРСАМЖУУД</span><span>{memories.length} зураг</span></div>
-        <div className="film-window">
-          <div className="film-group">
-            {memories.map((photo, index) => <button className={`film-photo ${activeIndex === index ? "chosen" : ""}`} key={index} aria-label={`${index + 1}-р дурсамжийг үзэх`} onClick={event => { setActive(index); open(index, event.currentTarget); }}>
-              <Image src={photoUrl(photo.src, 160)} alt={photo.alt} fill sizes="90px" unoptimized loading="lazy" className="thumbnail" />
-              <span>{String(index + 1).padStart(2, "0")}</span>
-            </button>)}
+        <div className="film-window" ref={filmWindow}
+          onPointerDown={event => {
+            if (!event.isPrimary || event.button !== 0) return;
+            suppressFilmClick.current = false;
+            filmDrag.current = { pointerId: event.pointerId, x: event.clientX, offset: filmOffset.current, moved: false };
+          }}
+          onPointerMove={event => {
+            const drag = filmDrag.current;
+            if (!drag || event.pointerId !== drag.pointerId) return;
+            const distance = event.clientX - drag.x;
+            if (!drag.moved && Math.abs(distance) < 6) return;
+            if (!drag.moved) event.currentTarget.setPointerCapture(event.pointerId);
+            drag.moved = true;
+            suppressFilmClick.current = true;
+            moveFilm(drag.offset - distance);
+          }}
+          onPointerUp={() => { filmDrag.current = null; }}
+          onPointerCancel={() => { filmDrag.current = null; }}
+          onLostPointerCapture={() => { filmDrag.current = null; }}
+          onPointerLeave={() => { if (!filmDrag.current?.moved) filmDrag.current = null; }}
+          onDragStart={event => event.preventDefault()}
+          onClickCapture={event => {
+            if (!suppressFilmClick.current || event.detail === 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+          }}>
+          <div className="film-track">
+            {Array.from({ length: filmCopies }, (_, copy) => (
+              <div className="film-group" key={copy} ref={copy === 0 ? firstFilmGroup : undefined} aria-hidden={copy > 0 ? true : undefined}>
+                {memories.map((photo, index) => <button className={`film-photo ${activeIndex === index ? "chosen" : ""}`} key={index} tabIndex={copy > 0 ? -1 : 0} aria-label={`${index + 1}-р дурсамжийг үзэх`} onClick={event => { setActive(index); open(index, event.currentTarget); }}>
+                  <Image src={photoUrl(photo.src, 160)} alt={copy > 0 ? "" : photo.alt} fill sizes="90px" unoptimized loading="lazy" draggable={false} className="thumbnail" />
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                </button>)}
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -92,21 +166,23 @@ export default function MemoriesPage() {
     </dialog>
     <style jsx>{`
       .empty-album{flex:1;display:grid;place-items:center;text-align:center;color:#eac3d8;font-size:13px}
-      .film-section .film-window{overflow-x:auto;margin:0;mask-image:none;scrollbar-width:thin}
+      .film-section .film-window{overflow:hidden;margin:0;mask-image:none;scrollbar-width:none;touch-action:pan-y;user-select:none;cursor:grab}
+      .film-window::-webkit-scrollbar{display:none}.film-window:active{cursor:grabbing}.film-window .film-photo{cursor:inherit}
       .film-section .film-group{width:max-content}
       .slide :global(.hero-photo){transform:none!important;transition:none!important}
       .album{position:fixed;inset:0;height:100dvh;overflow:hidden;background:#20111d;color:#fae9f1;font-family:Manrope,Arial,sans-serif}.ambient{position:absolute;inset:-60px;opacity:.16;filter:blur(65px);transform:scale(1.2);pointer-events:none}.ambient :global(img){object-fit:cover}.shell{position:relative;display:flex;flex-direction:column;gap:16px;height:100%;width:100%;max-width:470px;margin:auto;padding:max(16px,env(safe-area-inset-top)) 25px max(14px,env(safe-area-inset-bottom))}
       header{display:flex;align-items:center;justify-content:space-between;flex-shrink:0;height:28px}.back{display:flex;align-items:center;gap:7px;background:none;border:0;color:#e6c4d4;padding:6px 0;font-size:17px}.back span{font-size:10px}.collection{font-size:7px;letter-spacing:1.8px;color:#ae8e9f}.tiny-star{font-size:24px;color:#e5b0c9}.heading{position:relative;flex-shrink:0;padding-top:6px}.eyebrow{display:flex;align-items:center;gap:8px;font-size:7px;letter-spacing:2px;color:#d3a6bc;margin:0 0 12px}.eyebrow>span{width:17px;height:1px;background:#bf829f}h1{font-family:"Noto Serif",Georgia,serif;font-size:32px;font-weight:400;line-height:1.28;letter-spacing:-1px;margin:0}h1 em{color:#edb8cf;font-weight:400}h1>span{position:absolute;right:8px;top:40px;color:#d99db9;font-family:Georgia,serif;font-size:43px;transform:rotate(13deg)}.subtitle{color:#b59aa9;font-size:9px;margin:12px 0 0;letter-spacing:.2px}
       .gallery{display:flex;flex-direction:column;flex:1;min-height:0;gap:13px}.frame{position:relative;flex:1;min-height:0;border-radius:100px 100px 18px 18px;overflow:hidden;border:1px solid #f5d1df55;background:#512b40;box-shadow:0 14px 36px #0c060d44}.slide{position:absolute;inset:0;border:0;padding:0;background:transparent;opacity:0;pointer-events:none;transition:opacity .45s ease;overflow:hidden}.slide.visible{opacity:1;pointer-events:auto}.slide :global(.hero-photo){object-fit:cover;transform:scale(1.025);transition:transform 5s linear}.slide.visible :global(.hero-photo){transform:scale(1.09)}.frame-shade{position:absolute;inset:0;background:linear-gradient(#1e101e22,transparent 40%,#160b16cc);pointer-events:none}.frame-top{position:absolute;top:28px;left:25px;right:25px;display:flex;justify-content:space-between;align-items:center;pointer-events:none}.moment{font-size:7px;letter-spacing:2px;color:#fff5fa;text-shadow:0 1px 6px #000}.expand{background:#ffffff15;border:1px solid #ffffff44;backdrop-filter:blur(8px);width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-size:18px}.frame-caption{position:absolute;bottom:20px;left:22px;right:22px;pointer-events:none}.script{display:block;font-family:"Noto Serif",Georgia,serif;font-style:italic;font-size:12px;color:#ffe6ef}.caption-row{display:flex;justify-content:space-between;align-items:center;margin-top:9px;font-size:8px;letter-spacing:.8px;color:#ecd0de}.caption-row>span:last-child{font-size:22px}.gallery-controls{display:flex;align-items:center;gap:17px;flex-shrink:0;height:28px}.counter{white-space:nowrap;font-size:10px}.counter strong{font-size:17px;font-weight:500}.counter>span{color:#a98498;font-size:9px;margin-left:3px}.progress{display:flex;gap:4px;align-items:center;flex:1;min-width:0;overflow:hidden}.progress>span{height:2px;flex:1;background:#ffffff18;min-width:2px;border-radius:3px;transition:background .5s}.progress>.current{background:#edb2cf;box-shadow:0 0 8px #efacc055}.play{display:grid;place-items:center;width:29px;height:29px;border:1px solid #edbfda3d;border-radius:50%;background:#ffffff05;color:#e4bdd1}
-      .film-section{flex-shrink:0;min-width:0}.film-heading{display:flex;justify-content:space-between;align-items:center;font-size:7px;letter-spacing:1.5px;color:#c396ae;margin-bottom:10px}.film-heading>span:last-child{letter-spacing:.2px;color:#947487}.film-window{overflow:hidden;margin:0 -25px;mask-image:linear-gradient(to right,transparent,#000 7%,#000 93%,transparent)}.film-track{display:flex;width:max-content;animation:flow linear infinite;will-change:transform}.film-group{display:flex;gap:9px;padding-right:9px}.film-photo{position:relative;flex-shrink:0;width:76px;height:81px;border:1px solid #e7b5ce33;border-radius:10px;overflow:hidden;padding:0;background:#432438;transform:rotate(-3deg)}.film-photo:nth-child(even){transform:rotate(3deg)}.film-photo.chosen{border-color:#efbad5;box-shadow:0 0 12px #e5a5c333}.film-photo :global(.thumbnail){object-fit:cover}.film-photo>span{position:absolute;bottom:4px;left:6px;font-size:7px;color:white;text-shadow:0 1px 4px black}.film-group{padding-top:5px;padding-bottom:5px}footer{display:flex;gap:12px;align-items:center;justify-content:center;color:#8e6d82;font-size:7px;letter-spacing:1px;flex-shrink:0}.footer-line{height:1px;width:30px;background:#c196b02b}
+      .film-section{flex-shrink:0;min-width:0}.film-heading{display:flex;justify-content:space-between;align-items:center;font-size:7px;letter-spacing:1.5px;color:#c396ae;margin-bottom:10px}.film-heading>span:last-child{letter-spacing:.2px;color:#947487}.film-window{overflow:hidden;margin:0 -25px;mask-image:linear-gradient(to right,transparent,#000 7%,#000 93%,transparent)}.film-track{display:flex;width:max-content;}.film-group{display:flex;gap:9px;padding-right:9px}.film-photo{position:relative;flex-shrink:0;width:76px;height:81px;border:1px solid #e7b5ce33;border-radius:10px;overflow:hidden;padding:0;background:#432438;transform:rotate(-3deg)}.film-photo:nth-child(even){transform:rotate(3deg)}.film-photo.chosen{border-color:#efbad5;box-shadow:0 0 12px #e5a5c333}.film-photo :global(.thumbnail){object-fit:cover}.film-photo>span{position:absolute;bottom:4px;left:6px;font-size:7px;color:white;text-shadow:0 1px 4px black}.film-group{padding-top:5px;padding-bottom:5px}footer{display:flex;gap:12px;align-items:center;justify-content:center;color:#8e6d82;font-size:7px;letter-spacing:1px;flex-shrink:0}.footer-line{height:1px;width:30px;background:#c196b02b}
       button{font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}button:focus-visible{outline:2px solid #f3c7dc;outline-offset:3px}button:active{filter:brightness(1.1)}
       dialog{position:fixed;inset:0;border:0;padding:16px;margin:auto;width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;background:#1a0c18f5;color:#fce5f1;overflow:hidden}dialog::backdrop{background:#130710d9}.viewer-header{height:44px;display:flex;align-items:center;justify-content:space-between;font-size:12px;padding:0 3px}.viewer-header button{width:40px;height:40px;border:1px solid #e5b8ce33;border-radius:50%;background:#ffffff08;color:white;font-size:27px}.full-photo{position:relative;height:calc(100% - 112px);width:100%;touch-action:pan-y}.full-photo :global(.large-image){object-fit:contain}.viewer-controls{height:68px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 5px}.viewer-controls span{font-size:10px;color:#c99bb5}.viewer-controls button{width:38px;height:34px;border:1px solid #deb0c739;border-radius:12px;background:#ffffff08;color:#f9d8e9;font-size:20px}
-      @keyframes flow{to{transform:translateX(-50%)}}
+
       @media(max-height:700px){.shell{gap:10px;padding-top:10px;padding-bottom:10px}.heading{padding-top:0}h1{font-size:27px}.eyebrow{margin-bottom:7px}.subtitle{margin-top:7px}.film-photo{width:63px;height:61px}.film-heading{margin-bottom:5px}.gallery{gap:8px}.frame-top{top:16px}.frame-caption{bottom:12px}.heading h1>span{top:25px;font-size:35px}.script{font-size:10px}}
       @media(prefers-reduced-motion:reduce){.slide,.slide :global(.hero-photo),.progress>span{transition:none}.film-track{animation:none}.slide :global(.hero-photo){transform:none}}
     `}</style>
   </main>;
 }
+
 
 
 
