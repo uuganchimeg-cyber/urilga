@@ -52,8 +52,8 @@ const ts=require('typescript');
     const privateRows=await (await privateResponses.GET(request('/api/admin/responses','GET',null,true))).json();
     assert.equal(privateRows.length,3);assert.ok(privateRows.some(item=>item.id===row.id&&item.message===row.message));assert.ok(privateRows.some(item=>item.name===row.name&&item.message==='Шинэчилсэн сэтгэгдэл'));
     const publicRows=await (await comments.GET(request('/api/comments'))).json();assert.equal(publicRows.length,2);assert.equal('name' in publicRows[0],false);
-    for(const [file,kind,type] of [['public/memories/sample-1.jpg','image','image/jpeg'],['public/найз.mp3','audio','audio/mpeg'],['public/avla.gif','image','image/gif']]){
-      const bytes=await fsp.readFile(path.join(project,file));const form=new FormData();form.set('kind',kind);form.set('file',new File([bytes],path.basename(file),{type}));
+    for(const [file,kind,type] of [['public/uugna.jpg','image','image/jpeg'],['fixture.mp3','audio','audio/mpeg'],['public/avla.gif','image','image/gif']]){
+      const bytes=kind==="audio" ? Buffer.concat([Buffer.from("ID3"),Buffer.alloc(125)]) : await fsp.readFile(path.join(project,file));const form=new FormData();form.set('kind',kind);form.set('file',new File([bytes],path.basename(file),{type}));
       result=await upload.POST(request('/api/admin/upload','POST',form,true));assert.equal(result.status,200);const uploaded=await result.json();const filename=uploaded.url.split('/').pop();
       const params={params:Promise.resolve({filename})};const full=await media.GET(request(uploaded.url),params);assert.equal(full.status,200);assert.equal(full.headers.get('content-type'),type);assert.equal((await full.arrayBuffer()).byteLength,bytes.length);
       const ranged=await media.GET(request(uploaded.url,'GET',null,false,{range:'bytes=0-99'}),params);assert.equal(ranged.status,206);assert.equal((await ranged.arrayBuffer()).byteLength,100);
@@ -67,5 +67,6 @@ const ts=require('typescript');
     await fsp.rm(target,{recursive:true,force:true});
   }
 })().catch(error=>{console.error(error);process.exitCode=1;});
+
 
 
