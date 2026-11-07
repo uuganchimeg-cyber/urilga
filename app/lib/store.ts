@@ -60,3 +60,20 @@ export async function saveGuestResponse(value: { id: string; name: string; messa
 }
 
 
+
+export async function deleteGuestResponse(id: string) {
+  if (cloudEnabled()) {
+    await cloudTransaction<Record<string, GuestResponse>>("responses", current => {
+      if (!current || !Object.hasOwn(current, id)) return undefined;
+      const remaining = { ...current };
+      delete remaining[id];
+      return remaining;
+    });
+    return;
+  }
+  await local.exclusive(async () => {
+    const rows = await local.readResponses();
+    const remaining = rows.filter(row => row.id !== id);
+    if (remaining.length !== rows.length) await local.writeJson("responses.json", remaining);
+  });
+}
