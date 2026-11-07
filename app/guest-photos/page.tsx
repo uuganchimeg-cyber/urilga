@@ -184,17 +184,19 @@ export default function GuestPhotosPage() {
   const categoryLabel = category === "all" ? "файл" : category === "video" ? "видео" : "зураг";
 
   return <main className="guest-album">
-    <header className="album-header"><Link href="/">← Буцах</Link><span>{visibleItems.length} {categoryLabel}</span></header>
-    <section className="intro">
-      <p className="eyebrow">БИДНИЙ ХАМТЫН ЦОМОГ</p>
-      <h1>Зочдын <em>цомог</em></h1>
-      <p>Өөрийн авсан зураг, бичлэгээ бусад зочидтой хуваалцаарай.</p>
+    <header className="album-header">
+      <Link href="/">← Буцах</Link>
       <div className="categories" role="group" aria-label="Цомгийн ангилал">
         <button type="button" aria-pressed={category === "all"} onClick={() => setCategory("all")}>Бүгд</button>
         <button type="button" aria-pressed={category === "image"} onClick={() => setCategory("image")}>Зураг</button>
         <button type="button" aria-pressed={category === "video"} onClick={() => setCategory("video")}>Видео</button>
       </div>
-      <p>Зураг, видеог хамт сонгож болно · Видео 2 GB хүртэл</p>
+      <span>{visibleItems.length} {categoryLabel}</span>
+    </header>
+    <section className="intro">
+      <p className="eyebrow">БИДНИЙ ХАМТЫН ЦОМОГ</p>
+      <h1>Зочдын <em>цомог</em></h1>
+      <p>Өөрийн авсан зураг, бичлэгээ бусад зочидтой хуваалцаарай.</p>
       <input ref={picker} type="file" accept="image/*,video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" multiple hidden disabled={loading || !!progress}
         onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ""; void upload(files); }} />
       <GuestPhotoButton uploadLabel="Зураг, видео оруулах" disabled={loading || !!progress} onActivate={() => picker.current?.click()} />
@@ -215,9 +217,9 @@ export default function GuestPhotosPage() {
       {selected && selected.kind !== "video" && <><ZoomablePhoto key={selected.id}><Image src={selected.url} alt="Зочны оруулсан зураг" fill sizes="100vw" unoptimized loading="eager" draggable={false} /></ZoomablePhoto><div className="download"><button type="button" onClick={() => void savePhoto()}>Галерейд хадгалах</button>{manualSave && <a href={selected.url} target="_blank" rel="noopener noreferrer">Зургийг нээгээд удаан дарж хадгалаарай</a>}</div></>}
     </dialog>
     <style jsx>{`
-      .categories{display:flex;gap:8px;justify-content:center;margin:16px 0 8px}.categories button{padding:9px 22px;border-radius:999px;border:1px solid #e9acd166;color:inherit;background:transparent}.categories button[aria-pressed=true]{background:#754263}.video-card{position:absolute;left:8px;bottom:8px;padding:5px 8px;border-radius:8px;color:#fce5f1;background:#301b2de6}.video-player{position:absolute;inset:8% 0;width:100%;height:84%;object-fit:contain}
+      .categories{display:flex;gap:3px;justify-content:center}.categories button{min-height:36px;padding:5px clamp(4px,1.4vw,9px);font:inherit;border-radius:999px;border:1px solid #e9acd166;color:inherit;background:transparent}.categories button[aria-pressed=true]{background:#754263}.video-card{position:absolute;left:8px;bottom:8px;padding:5px 8px;border-radius:8px;color:#fce5f1;background:#301b2de6}.video-player{position:absolute;inset:8% 0;width:100%;height:84%;object-fit:contain}
       .guest-album{position:fixed;inset:0;height:100dvh;overflow-y:auto;padding:max(18px,env(safe-area-inset-top)) 20px max(28px,env(safe-area-inset-bottom));background:radial-gradient(ellipse at top,#512c44,#24101f 65%);color:#fce5f1;font-family:Manrope,Arial,sans-serif}
-      .album-header,.intro,.photos,.empty{max-width:480px;margin-left:auto;margin-right:auto}.album-header{position:sticky;top:0;z-index:2;background:#311829;border-bottom:1px solid #e9acd139;border-radius:12px;padding:0 12px;display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:12px;color:#dbabc4}.album-header :global(a){color:inherit;text-decoration:none;padding:10px 0}
+      .album-header,.intro,.photos,.empty{max-width:480px;margin-left:auto;margin-right:auto}.album-header{position:sticky;top:0;z-index:2;background:#311829;border-bottom:1px solid #e9acd139;border-radius:12px;padding:4px 6px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:3px;font-size:11px;color:#dbabc4;white-space:nowrap}.album-header>span{text-align:right}.album-header :global(a){justify-self:start;color:inherit;text-decoration:none;padding:10px 0}
       .intro{text-align:center;padding:25px 0 20px}.intro .eyebrow{font-size:9px;letter-spacing:2px;color:#d1a0bc}.intro h1{font:400 30px/1.4 "Noto Serif",Georgia,serif;margin:11px 0}.intro em{color:#edb8d0}.intro p{font-size:12px;line-height:1.8;color:#d0adc2;margin:10px 0}
       .download button,.download a{color:inherit;font:inherit}
       .download a{display:block;margin-top:8px;white-space:normal}
