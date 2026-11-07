@@ -86,41 +86,74 @@ export default function GuestPhotosPage() {
   const [selected, setSelected] = useState<Photo | null>(null);
 
   const [shareFile, setShareFile] = useState<File | null>(null);
-  const [manualSave, setManualSave] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "loading" | "ready" | "manual">("idle");
+  const saveRequest = useRef<AbortController | null>(null);
 
-  useEffect(() => {
-    if (!selected || selected.kind === "video" || !navigator.share || !navigator.canShare) return;
-    const controller = new AbortController();
-    const id = selected.id;
+  useEffect(() => () => saveRequest.current?.abort(), []);
 
-    async function prepareShare() {
-      try {
-        const response = await fetch(`/api/guest-photos?download=${encodeURIComponent(id)}`, { signal: controller.signal });
-        if (!response.ok) return;
-        const blob = await response.blob();
-        if (controller.signal.aborted || !blob.type.startsWith("image/")) return;
-        const extension = blob.type === "image/jpeg" ? "jpg" : blob.type.split("/")[1];
-        const file = new File([blob], `urilga-${id}.${extension}`, { type: blob.type });
-        if (navigator.canShare({ files: [file] })) setShareFile(file);
-      } catch {
-        // The original image is still available through the manual save link.
-      }
-    }
+  function resetSave() {
+    saveRequest.current?.abort();
+    setShareFile(null);
+    setSaveState("idle");
+  }
 
-    void prepareShare();
-    return () => controller.abort();
-  }, [selected]);
-
-  async function savePhoto() {
+  async function saveMedia(item: Photo) {
     if (shareFile) {
       try {
         await navigator.share({ files: [shareFile] });
-        return;
+        setSaveState("idle");
       } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (!(error instanceof DOMException && error.name === "AbortError")) setSaveState("manual");
       }
+      return;
     }
-    setManualSave(true);
+
+    if (!navigator.share || !navigator.canShare) {
+      setSaveState("manual");
+      return;
+    }
+
+    const controller = new AbortController();
+    saveRequest.current = controller;
+    setSaveState("loading");
+    try {
+      const response = await fetch(`/api/guest-photos?download=${encodeURIComponent(item.id)}`, { signal: controller.signal });
+      if (!response.ok || !response.body) throw new Error();
+      const reader = response.body.getReader();
+      const chunks: ArrayBuffer[] = [];
+      let bytes = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > 50_000_000) {
+          void reader.cancel();
+          throw new Error();
+        }
+        chunks.push(value.slice().buffer);
+      }
+      const type = response.headers.get("content-type") ?? "";
+      const extension = /\.(jpe?g|png|webp|mp4|mov|webm)$/i.exec(item.url)?.[1];
+      if (!extension) throw new Error();
+      const file = new File(chunks, `urilga-${item.id.slice(0, 12)}.${extension}`, { type });
+      if (!navigator.canShare({ files: [file] })) throw new Error();
+      if (controller.signal.aborted) return;
+      setShareFile(file);
+      if (!navigator.userActivation?.isActive) {
+        setSaveState("ready");
+        return;
+      }
+      try {
+        await navigator.share({ files: [file] });
+        if (!controller.signal.aborted) setSaveState("idle");
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setSaveState(error instanceof DOMException && error.name === "AbortError" ? "idle" : "ready");
+        }
+      }
+    } catch {
+      if (!controller.signal.aborted) setSaveState("manual");
+    }
   }
   const viewer = useRef<HTMLDialogElement>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -206,27 +239,37 @@ export default function GuestPhotosPage() {
     </section>
     {loading ? <p className="empty">Цомгийг ачаалж байна…</p> : visibleItems.length ? (
       <div className="photos">
-        {visibleItems.map((photo, index) => <button key={photo.id} className="photo" type="button" aria-label={`${index + 1}-р ${photo.kind === "video" ? "видео" : "зураг"} үзэх`} onClick={() => { setShareFile(null); setManualSave(false); setSelected(photo); viewer.current?.showModal(); }}>
+        {visibleItems.map((photo, index) => <button key={photo.id} className="photo" type="button" aria-label={`${index + 1}-р ${photo.kind === "video" ? "видео" : "зураг"} үзэх`} onClick={() => { resetSave(); setSelected(photo); viewer.current?.showModal(); }}>
           {photo.kind === "video" ? <><Image src={photo.url.replace("/video/upload/", "/video/upload/so_0,c_fill,w_450,h_450,q_auto/").replace(/\.(mp4|mov|webm)$/i, ".jpg")} alt="" fill sizes="(max-width: 500px) 48vw, 220px" unoptimized /><span className="video-card">▶ Видео</span></> : <Image src={thumbnail(photo.url)} alt="" fill sizes="(max-width: 500px) 48vw, 220px" unoptimized />}
         </button>)}
       </div>
     ) : !error && <p className="empty">Одоогоор {categoryLabel} ороогүй байна ♡</p>}
-    <dialog ref={viewer} className="viewer" aria-label="Цомгийн файл үзэх" onClose={() => setSelected(null)}>
-      <button type="button" onClick={() => viewer.current?.close()} aria-label="Хаах">×</button>
+    <dialog ref={viewer} className="viewer" aria-label="Цомгийн файл үзэх" onClose={() => { resetSave(); setSelected(null); }}>
+      <button className="viewer-close" type="button" onClick={() => viewer.current?.close()} aria-label="Хаах">×</button>
       {selected?.kind === "video" && <video className="video-player" src={selected.url.replace("/video/upload/", "/video/upload/f_mp4,vc_h264/").replace(/\.(mov|webm)$/i, ".mp4")} controls playsInline preload="metadata" />}
-      {selected && selected.kind !== "video" && <><ZoomablePhoto key={selected.id}><Image src={selected.url} alt="Зочны оруулсан зураг" fill sizes="100vw" unoptimized loading="eager" draggable={false} /></ZoomablePhoto><div className="download"><button type="button" onClick={() => void savePhoto()}>Галерейд хадгалах</button>{manualSave && <a href={selected.url} target="_blank" rel="noopener noreferrer">Зургийг нээгээд удаан дарж хадгалаарай</a>}</div></>}
+      {selected && selected.kind !== "video" && <ZoomablePhoto key={selected.id}><Image src={selected.url} alt="Зочны оруулсан зураг" fill sizes="100vw" unoptimized loading="eager" draggable={false} /></ZoomablePhoto>}
+      {selected && <div className="save-controls">
+        <button type="button" className="save-button" aria-label="Галерейд хадгалах" title="Галерейд хадгалах" disabled={saveState === "loading"} onClick={() => void saveMedia(selected)}>
+          <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4" /></svg>
+        </button>
+        {saveState === "loading" && <span role="status">Бэлдэж байна…</span>}
+        {saveState === "ready" && <span role="status">Хадгалах цэс нээхийн тулд дахин дарна уу</span>}
+        {saveState === "manual" && (selected.kind === "video"
+          ? <a href={`/api/guest-photos?download=${encodeURIComponent(selected.id)}`} download>Видео файл татах</a>
+          : <a href={selected.url} target="_blank" rel="noopener noreferrer">Зургийг нээгээд удаан дарж хадгалаарай</a>)}
+      </div>}
     </dialog>
     <style jsx>{`
-      .categories{display:flex;gap:3px;justify-content:center}.categories button{min-height:36px;padding:5px clamp(4px,1.4vw,9px);font:inherit;border-radius:4px;border:1px solid #e9acd166;color:inherit;background:transparent}.categories button[aria-pressed=true]{background:#754263}.video-card{position:absolute;left:8px;bottom:8px;padding:5px 8px;border-radius:8px;color:#fce5f1;background:#301b2de6}.video-player{position:absolute;inset:8% 0;width:100%;height:84%;object-fit:contain}
+      .categories{display:flex;gap:3px;justify-content:center}.categories button{min-height:36px;padding:5px clamp(4px,1.4vw,9px);font:inherit;border-radius:4px;border:1px solid #e9acd166;color:inherit;background:transparent}.categories button[aria-pressed=true]{background:#754263}.video-card{position:absolute;left:8px;bottom:8px;padding:5px 8px;border-radius:8px;color:#fce5f1;background:#301b2de6}.video-player{position:absolute;inset:8% 0;width:100%;height:calc(92% - max(66px, env(safe-area-inset-bottom) + 52px));object-fit:contain}
       .guest-album{position:fixed;inset:0;height:100dvh;overflow-y:auto;padding:max(18px,env(safe-area-inset-top)) 20px max(28px,env(safe-area-inset-bottom));background:radial-gradient(ellipse at top,#512c44,#24101f 65%);color:#fce5f1;font-family:Manrope,Arial,sans-serif}
       .album-header,.intro,.photos,.empty{max-width:480px;margin-left:auto;margin-right:auto}.album-header{position:sticky;top:0;z-index:2;background:#311829;border-bottom:1px solid #e9acd139;border-radius:12px;padding:4px 6px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:3px;font-size:11px;color:#dbabc4;white-space:nowrap}.album-header>span{text-align:right}.album-header :global(a){justify-self:start;color:inherit;text-decoration:none;padding:10px 0}
       .intro{text-align:center;padding:25px 0 20px}.intro .eyebrow{font-size:9px;letter-spacing:2px;color:#d1a0bc}.intro h1{font:400 30px/1.4 "Noto Serif",Georgia,serif;margin:11px 0}.intro em{color:#edb8d0}.intro p{font-size:12px;line-height:1.8;color:#d0adc2;margin:10px 0}
-      .download button,.download a{color:inherit;font:inherit}
-      .download a{display:block;margin-top:8px;white-space:normal}
-      .download{position:absolute;z-index:1;bottom:max(22px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);padding:12px 18px;border-radius:12px;background:#5c3450;color:white;text-decoration:none;white-space:nowrap}
       .intro .notice{color:#f1c5dc}.intro .error{color:#ffc3cc;overflow-wrap:anywhere}
       .photos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.photo{position:relative;aspect-ratio:1;overflow:hidden;border:1px solid #e9acd139;border-radius:15px;background:#4b263c;cursor:pointer}.photo :global(img){object-fit:cover}.empty{text-align:center;color:#cb9fb7;font-size:13px;padding:22px 0}
-      .viewer{position:fixed;inset:0;width:100vw;height:100dvh;max-width:none;max-height:none;margin:0;border:0;background:#180b17}.viewer::backdrop{background:#180b17}.viewer :global(img){object-fit:contain}.viewer button{position:absolute;right:16px;top:max(14px,env(safe-area-inset-top));z-index:1;width:44px;height:44px;border-radius:50%;border:1px solid #e9acd166;background:#392035;color:white;font-size:25px;cursor:pointer}
+      .save-controls{position:absolute;z-index:2;right:16px;bottom:max(14px,env(safe-area-inset-bottom));display:flex;flex-direction:row-reverse;align-items:center;gap:8px;max-width:calc(100% - 32px);color:#ffe8f4}
+      .save-button{width:48px;height:48px;flex:none;display:grid;place-items:center;border-radius:50%;border:1px solid #f7cce1a1;background:linear-gradient(145deg,#b96d99e8,#532d50ef);box-shadow:0 5px 18px #170a2144;color:inherit;cursor:pointer}
+      .save-controls span,.save-controls a{padding:6px 9px;border-radius:8px;background:#36192f;color:inherit;font-size:12px}
+      .viewer{position:fixed;inset:0;width:100vw;height:100dvh;max-width:none;max-height:none;margin:0;border:0;background:#180b17}.viewer::backdrop{background:#180b17}.viewer :global(img){object-fit:contain}.viewer-close{position:absolute;right:16px;top:max(14px,env(safe-area-inset-top));z-index:1;width:44px;height:44px;border-radius:50%;border:1px solid #e9acd166;background:#392035;color:white;font-size:25px;cursor:pointer}
     `}</style>
   </main>;
 }
