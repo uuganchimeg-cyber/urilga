@@ -3,11 +3,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { json, requireAdmin, sameOrigin } from "../../lib/admin-auth";
-import { cloudEnabled, cloudTransaction, readCloud } from "../../lib/firebase-server";
-import { allowedCloudinaryUrl, mediaExtension, uploadCloudMedia } from "../../lib/cloudinary-server";
+import { cloudEnabled, cloudTransaction, firebaseNamespace, readCloud } from "../../lib/firebase-server";
+import { allowedCloudinaryUrl, cloudinaryAccount, getCloudinary, mediaExtension, uploadCloudMedia } from "../../lib/cloudinary-server";
 import { exclusive, readJson, uploadDirectory, writeJson } from "../../lib/local-store";
 
-type Photo = { id: string; url: string; createdAt: string };
+import { maxGuestVideoBytes } from "../../lib/guest-media-limits";
+
+type Photo = { id: string; url: string; createdAt: string; kind?: "video" };
 type Album = Record<string, Photo>;
 const albumPath = "guestPhotos";
 const maxBytes = 4_000_000;
@@ -22,7 +24,7 @@ export async function GET(request: NextRequest) {
     const album = await readAlbum();
     if (downloadId !== null) {
       if (!/^[a-f0-9]{64}$/.test(downloadId) || !album[downloadId]) return json({ error: "Зураг олдсонгүй." }, 404);
-      return await downloadPhoto(album[downloadId]);
+      return await downloadPhoto(album[downloadId], request.signal);
     }
     const photos = Object.values(album);
     return json(photos.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
@@ -31,6 +33,68 @@ export async function GET(request: NextRequest) {
   }
 }
 
+
+
+const videoFormats = ["mp4", "mov", "webm"];
+const videoPublicId = (key: string) => `urilga/${firebaseNamespace()}/guest-video-${key}`;
+
+export async function PATCH(request: NextRequest) {
+  if (!sameOrigin(request)) return json({ error: "Хүсэлт зөвшөөрөгдөөгүй." }, 403);
+  if (!cloudEnabled()) return json({ error: "Видео оруулахад Cloudinary болон Firebase холболт шаардлагатай." }, 503);
+  try {
+    if (Object.keys(await readAlbum()).length >= maxPhotos) return json({ error: "Цомог дүүрсэн байна." }, 409);
+    const account = cloudinaryAccount();
+    const key = randomUUID();
+    const fields = {
+      public_id: videoPublicId(key),
+      timestamp: Math.floor(Date.now() / 1000),
+      allowed_formats: videoFormats.join(","),
+      overwrite: false,
+    };
+    return json({
+      key,
+      endpoint: `https://api.cloudinary.com/v1_1/${encodeURIComponent(account.cloud_name)}/video/upload`,
+      fields: { ...fields, api_key: account.api_key, signature: getCloudinary().utils.api_sign_request(fields, account.api_secret) },
+    });
+  } catch {
+    return json({ error: "Видео байршуулах эрх бэлдэж чадсангүй." }, 503);
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  if (!sameOrigin(request)) return json({ error: "Хүсэлт зөвшөөрөгдөөгүй." }, 403);
+  if (!cloudEnabled()) return json({ error: "Видео хадгалах холболт идэвхгүй байна." }, 503);
+  const key = request.nextUrl.searchParams.get("video");
+  if (!key || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(key)) {
+    return json({ error: "Видеоны дугаар буруу байна." }, 400);
+  }
+
+  try {
+    const publicId = videoPublicId(key);
+    const id = createHash("sha256").update(publicId).digest("hex");
+    const existing = (await readAlbum())[id];
+    if (existing) return json(existing);
+    const cloud = getCloudinary();
+    const video = await cloud.api.resource(publicId, { resource_type: "video", type: "upload" });
+    if (!videoFormats.includes(video.format) || !video.width || !video.height ||
+        !Number.isFinite(video.bytes) || video.bytes <= 0 || video.bytes > maxGuestVideoBytes ||
+        !allowedCloudinaryUrl(video.secure_url)) {
+      await cloud.uploader.destroy(publicId, { resource_type: "video" });
+      return json({ error: "2 GB хүртэлх MP4, MOV эсвэл WebM бичлэг сонгоно уу." }, 400);
+    }
+    const item: Photo = { id, url: video.secure_url, createdAt: new Date().toISOString(), kind: "video" };
+    const result = await cloudTransaction<Album>(albumPath, current => {
+      const items = current ?? {};
+      if (items[id] || Object.keys(items).length >= maxPhotos) return undefined;
+      return { ...items, [id]: item };
+    });
+    if (result.value?.[id]) return json(result.value[id]);
+    await cloud.uploader.destroy(publicId, { resource_type: "video" });
+    return json({ error: "Цомог дүүрсэн байна." }, 409);
+  } catch {
+    return json({ error: "Видеог цомогт хадгалж чадсангүй." }, 503);
+  }
+}
 export async function POST(request: NextRequest) {
   if (!sameOrigin(request)) return json({ error: "Хүсэлт зөвшөөрөгдөөгүй." }, 403);
   if (Number(request.headers.get("content-length") || 0) > maxBytes + 100_000) {
@@ -79,12 +143,12 @@ export async function POST(request: NextRequest) {
 }
 
 
-async function downloadPhoto(photo: Photo) {
-  const extension = /\.(jpg|jpeg|png|webp)$/i.exec(photo.url)?.[1]?.toLowerCase();
+async function downloadPhoto(photo: Photo, signal: AbortSignal) {
+  const extension = /\.(jpg|jpeg|png|webp|mp4|mov|webm)$/i.exec(photo.url)?.[1]?.toLowerCase();
   if (!extension) return json({ error: "Зургийн формат тохирохгүй байна." }, 404);
   const headers = {
     "Content-Disposition": `attachment; filename="guest-${photo.id.slice(0, 12)}.${extension}"`,
-    "Content-Type": extension === "jpg" ? "image/jpeg" : `image/${extension}`,
+    "Content-Type": photo.kind === "video" ? (extension === "mov" ? "video/quicktime" : `video/${extension}`) : `image/${extension === "jpg" ? "jpeg" : extension}`,
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
   };
@@ -94,7 +158,7 @@ async function downloadPhoto(photo: Photo) {
     return new Response(new Uint8Array(bytes), { headers });
   }
   if (!allowedCloudinaryUrl(photo.url)) return json({ error: "Зургийн холбоос буруу байна." }, 404);
-  const upstream = await fetch(photo.url, { redirect: "error", signal: AbortSignal.timeout(20000) });
+  const upstream = await fetch(photo.url, { redirect: "error", signal: photo.kind === "video" ? signal : AbortSignal.timeout(20000) });
   if (!upstream.ok || !upstream.body) return json({ error: "Зургийг татаж чадсангүй." }, 502);
   return new Response(upstream.body, { headers });
 }
