@@ -1,4 +1,3 @@
-import { memories } from "../memories/photos";
 import { venue } from "../location/venue";
 
 export type Photo = { src: string; alt: string };
@@ -16,7 +15,7 @@ export type GuestResponse = { id: string; name: string; message: string; created
 export const defaultSettings: SiteSettings = {
   heroImage: "/uugna.jpg",
   birthday: "2026-12-03T00:00:00+08:00",
-  music: "/найз.mp3",
+  music: "",
   invitation: {
     eyebrow: "ЧАМД ЗОРИУЛСАН УРИЛГА",
     title: "Эрхэм хүндэт найз нөхөд та бүхнийг",
@@ -24,7 +23,7 @@ export const defaultSettings: SiteSettings = {
     closing: "Хүрэлцэн ирж, миний онцгой өдрийг улам үнэ цэнтэй болгоорой! 🎀",
   },
   accepted: { image: "/avla.gif", message: "Урилгийг минь хүлээн авсан найздаа хайртай шүү псдаа минь", emojis: "🥰 💖 🦋" },
-  gallery: { photos: memories, intervalMs: 1000 },
+  gallery: { photos: [], intervalMs: 1000 },
   venue: { ...venue, mapEmbedUrl: "", mapLink: "" },
 };
 
@@ -33,3 +32,15 @@ export function socialUrl(value: string, site: "facebook" | "instagram") {
   if (value.startsWith("https://")) return value;
   return `https://www.${site}.com/${encodeURIComponent(value.replace(/^@/, ""))}/`;
 }
+
+export function withoutBundledMedia(settings: SiteSettings): SiteSettings {
+  return {
+    ...settings,
+    music: ["/найз.mp3", encodeURI("/найз.mp3")].includes(settings.music) ? "" : settings.music,
+    gallery: {
+      ...settings.gallery,
+      photos: (settings.gallery.photos ?? []).filter(photo => !/^\/memories\/sample-[1-6]\.jpg$/i.test(photo.src)),
+    },
+  };
+}
+
