@@ -120,24 +120,25 @@ export default function MemoriesPage() {
         <div className="film-heading"><span>БҮХ ДУРСАМЖУУД</span><span>{memories.length} зураг</span></div>
         <div className="film-window" ref={filmWindow}
           onPointerDown={event => {
-            if (!event.isPrimary || event.button !== 0) return;
+            if (filmDrag.current || (event.pointerType === "mouse" && event.button !== 0)) return;
             suppressFilmClick.current = false;
-            filmDrag.current = { pointerId: event.pointerId, x: event.clientX, offset: filmOffset.current, moved: false };
+            filmDrag.current = { pointerId: event.pointerId, x: event.clientX, offset: event.currentTarget.scrollLeft, moved: false };
+            // Capture on the original button so a tap still opens the image.
+            const target = event.target instanceof Element ? event.target.closest("button") : null;
+            (target ?? event.currentTarget).setPointerCapture(event.pointerId);
           }}
           onPointerMove={event => {
             const drag = filmDrag.current;
             if (!drag || event.pointerId !== drag.pointerId) return;
             const distance = event.clientX - drag.x;
             if (!drag.moved && Math.abs(distance) < 6) return;
-            if (!drag.moved) event.currentTarget.setPointerCapture(event.pointerId);
             drag.moved = true;
             suppressFilmClick.current = true;
             moveFilm(drag.offset - distance);
           }}
-          onPointerUp={() => { filmDrag.current = null; }}
-          onPointerCancel={() => { filmDrag.current = null; }}
-          onLostPointerCapture={() => { filmDrag.current = null; }}
-          onPointerLeave={() => { if (!filmDrag.current?.moved) filmDrag.current = null; }}
+          onPointerUp={event => { if (filmDrag.current?.pointerId === event.pointerId) filmDrag.current = null; }}
+          onPointerCancel={event => { if (filmDrag.current?.pointerId === event.pointerId) filmDrag.current = null; }}
+          onLostPointerCapture={event => { if (filmDrag.current?.pointerId === event.pointerId) filmDrag.current = null; }}
           onDragStart={event => event.preventDefault()}
           onClickCapture={event => {
             if (!suppressFilmClick.current || event.detail === 0) return;
@@ -166,7 +167,7 @@ export default function MemoriesPage() {
     </dialog>
     <style jsx>{`
       .empty-album{flex:1;display:grid;place-items:center;text-align:center;color:#eac3d8;font-size:13px}
-      .film-section .film-window{overflow:hidden;margin:0;mask-image:none;scrollbar-width:none;touch-action:pan-y;user-select:none;cursor:grab}
+      .film-section .film-window{overflow:hidden;margin:0;mask-image:none;scrollbar-width:none;touch-action:none;overscroll-behavior:contain;user-select:none;cursor:grab}
       .film-window::-webkit-scrollbar{display:none}.film-window:active{cursor:grabbing}.film-window .film-photo{cursor:inherit}
       .film-section .film-group{width:max-content}
       .slide :global(.hero-photo){transform:none!important;transition:none!important}
@@ -182,6 +183,7 @@ export default function MemoriesPage() {
     `}</style>
   </main>;
 }
+
 
 
 
