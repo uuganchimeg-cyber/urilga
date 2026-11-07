@@ -65,6 +65,18 @@ const ts=require('typescript');
       const params={params:Promise.resolve({filename})};const full=await media.GET(request(uploaded.url),params);assert.equal(full.status,200);assert.equal(full.headers.get('content-type'),type);assert.equal((await full.arrayBuffer()).byteLength,bytes.length);
       const ranged=await media.GET(request(uploaded.url,'GET',null,false,{range:'bytes=0-99'}),params);assert.equal(ranged.status,206);assert.equal((await ranged.arrayBuffer()).byteLength,100);
     }
+    const guestPhotos = require('../app/api/guest-photos/route.ts');
+    const guestImage = await fsp.readFile(path.join(project, 'public/uugna.jpg'));
+    function guestUpload() {
+      const form = new FormData();
+      form.set('file', new File([guestImage], 'guest.jpg', {type:'image/jpeg'}));
+      return guestPhotos.POST(request('/api/guest-photos', 'POST', form));
+    }
+    const guestUploads = await Promise.all([guestUpload(), guestUpload()]);
+    assert.ok(guestUploads.every(response => response.status === 200));
+    const guestAlbum = await (await guestPhotos.GET(request('/api/guest-photos'))).json();
+    assert.equal(guestAlbum.length, 1);
+    assert.match(guestAlbum[0].url, /^\/api\/media\/.+\.jpg$/);
     const invalid=new FormData();invalid.set('kind','image');invalid.set('file',new File(['<script>bad</script>'],'bad.jpg',{type:'image/jpeg'}));assert.equal((await upload.POST(request('/api/admin/upload','POST',invalid,true))).status,400);
     assert.equal((await session.DELETE(request('/api/admin/session','DELETE',null,true))).headers.get('set-cookie').includes('Max-Age=0'),true);
     console.log('PASS: authentication, validation, settings persistence, revision conflict, responses, public privacy, JPG/GIF/MP3 uploads and audio range requests.');
@@ -74,3 +86,8 @@ const ts=require('typescript');
     await fsp.rm(target,{recursive:true,force:true});
   }
 })().catch(error=>{console.error(error);process.exitCode=1;});
+
+
+
+
+
