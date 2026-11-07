@@ -5,3 +5,56 @@
 
 
 .ua-mobileLogout{display:none;border:1px solid #deccd8;background:transparent;color:#936580;border-radius:8px;padding:9px;font-size:10px;cursor:pointer}@media(max-width:800px){.ua-mobileLogout{display:block}}
+
+.ua-saveProgress { flex-shrink: 0; padding: 11px 38px 13px; background: #fffafd; border-bottom: 1px solid #ece1e8; }
+.ua-progressLabel { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 7px; font-size: 12px; color: #62435a; }
+.ua-progressLabel strong { font-variant-numeric: tabular-nums; color: #814968; }
+.ua-saveProgress progress { display: block; width: 100%; height: 6px; border: 0; border-radius: 9px; overflow: hidden; background: #efe2eb; accent-color: #a66a92; }
+.ua-saveProgress progress::-webkit-progress-bar { background: #efe2eb; }
+.ua-saveProgress progress::-webkit-progress-value { background: linear-gradient(90deg, #b77a9f, #824b74); transition: width .13s linear; }
+.ua-saveProgress progress::-moz-progress-bar { background: #a66a92; }
+.ua-field > span, .ua-cardHeading h2 { color: #54384d; }
+.ua-cardHeading p, .ua-field small, .ua-muted { color: #796475; }
+.ua-primary { font-size: 12px; }
+@media (max-width: 800px) {
+  .ua-admin { background: #f8f4f7; }
+  .ua-sidebar { padding: max(10px, env(safe-area-inset-top)) 12px 10px; }
+  .ua-brand { margin: 0 0 8px; padding: 0 4px; }
+  .ua-sidebar nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; overflow: visible; padding: 0; }
+  .ua-sidebar nav button { min-height: 44px; position: relative; flex-direction: column; justify-content: center; gap: 2px; padding: 4px 2px; white-space: normal; text-align: center; font-size: 9px; line-height: 1.25; border-radius: 9px; }
+  .ua-sidebar nav b { position: absolute; right: 3px; top: 3px; padding: 2px 4px; font-size: 8px; }
+  .ua-navIcon { line-height: 1; }
+  .ua-workspace { min-height: 0; }
+  .ua-topbar { padding: 8px 12px; min-height: 60px; gap: 8px; }
+  .ua-topbar > span { display: none; }
+  .ua-topbar > div { flex: 1; min-width: 0; gap: 8px; }
+  .ua-topbar .ua-primary { flex: 1; min-height: 44px; font-size: 13px; }
+  .ua-mobileLogout { min-height: 44px; margin-left: auto; font-size: 12px; padding: 8px 13px; }
+  .ua-saveProgress { padding: 8px 14px 10px; }
+  .ua-content { padding: 15px 12px max(18px, env(safe-area-inset-bottom)); min-height: 0; }
+  .ua-pageHeading { margin-bottom: 16px; }
+  .ua-pageHeading h1 { font-size: 23px; }
+  .ua-stats { margin-bottom: 14px; }
+  .ua-stats > div { padding: 10px 7px; gap: 5px; }
+  .ua-stats div > span { font-size: 8px; letter-spacing: .3px; }
+  .ua-stats strong { font-size: clamp(13px, 4vw, 19px); }
+  .ua-card { border-radius: 14px; padding: 15px; }
+  .ua-cardHeading { margin-bottom: 14px; }
+  .ua-cardHeading h2 { font-size: 15px; }
+  .ua-cardHeading p, .ua-field small, .ua-upload small { font-size: 11px; }
+  .ua-field > span { font-size: 13px; }
+  .ua-field input, .ua-field textarea, .ua-photoBody .ua-field input, .ua-responseToolbar input { font-size: 16px; }
+  .ua-twoColumn, .ua-stack, .ua-fields, .ua-fieldRow, .ua-galleryTop { gap: 14px; }
+  .ua-imagePreview { height: min(220px, 32dvh); }
+  .ua-photoGrid { gap: 9px; }
+  .ua-photoImage { height: 115px; }
+  .ua-photoBody { padding: 8px; }
+  .ua-photoActions button { min-height: 38px; }
+  .ua-tableWrap table, .ua-tableWrap tbody, .ua-tableWrap tr, .ua-tableWrap td { display: block; width: 100%; }
+  .ua-tableWrap thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .ua-tableWrap tbody tr { border: 1px solid #eee1e9; border-radius: 11px; padding: 10px 12px; margin-bottom: 9px; background: #fff9fc; }
+  .ua-tableWrap td { border: 0; padding: 3px 0; font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ua-saveProgress progress::-webkit-progress-value { transition: none; }
+}
