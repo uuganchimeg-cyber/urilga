@@ -81,6 +81,7 @@ const [session,setSession]=useState<{configured:boolean;authenticated:boolean}|n
 const [authBusy,setAuthBusy]=useState(false),[password,setPassword]=useState(""),[confirmation,setConfirmation]=useState("");
 const [tab,setTab]=useState<Tab>("home"),[document,setDocument]=useState<SettingsDocument|null>(null),[draft,setDraft]=useState<SiteSettings>(defaultSettings);
 const [loading,setLoading]=useState(false),[saving,setSaving]=useState(false),[uploads,setUploads]=useState(0),[error,setError]=useState(""),[notice,setNotice]=useState("");
+const [saveProgress, setSaveProgress] = useState<number | null>(null);
 const [responses,setResponses]=useState<GuestResponse[]>([]),[responsesLoading,setResponsesLoading]=useState(false),[search,setSearch]=useState("");
 const contentRef=useRef<HTMLDivElement>(null);
 const dirty=!!document&&JSON.stringify(document.settings)!==JSON.stringify(draft);
@@ -97,14 +98,46 @@ const updateInvitation=(key:keyof SiteSettings["invitation"],value:string)=>setD
 const updateAccepted=(key:keyof SiteSettings["accepted"],value:string)=>setDraft(old=>({...old,accepted:{...old.accepted,[key]:value}}));
 const updateVenue=(key:keyof SiteSettings["venue"],value:string|boolean)=>setDraft(old=>({...old,venue:{...old.venue,[key]:value}}));
 async function logout(){try{await api("/api/admin/session",{method:"DELETE"});setSession({configured:true,authenticated:false});setResponses([]);setDocument(null);setError("");}catch(e){setError((e as Error).message);}}
-async function save(){if(!document||saving||uploads)return;setSaving(true);setError("");setNotice("");try{const next=await api<SettingsDocument>("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({settings:draft,revision:document.revision})});setDocument(next);setDraft(next.settings);setNotice("Өөрчлөлтүүд хадгалагдлаа. Зочдын хуудсанд шинэчлэгдэнэ.");window.dispatchEvent(new Event("site-settings-changed"));}catch(e){setError((e as Error).message);}finally{setSaving(false);}}
+async function save() {
+  if (!document || saving || uploads || !dirty) return;
+  setSaving(true);
+  setError("");
+  setNotice("");
+  setSaveProgress(0);
+  // The progress estimate stops below completion until the database confirms the write.
+  const timer = window.setInterval(() => {
+    setSaveProgress(value => Math.min(90, (value ?? 0) + Math.max(1, Math.ceil((90 - (value ?? 0)) / 10))));
+  }, 80);
+  try {
+    const next = await api<SettingsDocument>("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: draft, revision: document.revision }),
+    });
+    setDocument(next);
+    setDraft(current => current === draft ? next.settings : current);
+    setSaveProgress(100);
+    setNotice("Өөрчлөлтүүд хадгалагдлаа. Зочдын хуудсанд шинэчлэгдэнэ.");
+    window.dispatchEvent(new Event("site-settings-changed"));
+  } catch (error) {
+    setSaveProgress(null);
+    setError((error as Error).message);
+  } finally {
+    window.clearInterval(timer);
+    setSaving(false);
+  }
+}
 function exportResponses(){const quote=(v:string)=>`"${(/^[=+@\-\t\r]/.test(v)?"'":"")+v.replaceAll('"','""')}"`;const csv="\uFEFF"+[["Нэр","Сэтгэгдэл","Илгээсэн огноо"],...responses.map(r=>[r.name,r.message,new Date(r.createdAt).toLocaleString("mn-MN",{timeZone:"Asia/Ulaanbaatar"})])].map(r=>r.map(quote).join(",")).join("\r\n");const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));const a=window.document.createElement("a");a.href=url;a.download="urilga-hariu.csv";a.click();URL.revokeObjectURL(url);}
 const page=tabs.find(item=>item.id===tab)!;const uploadProps={setBusy:busy,onError:setError};
 const dateValue=Number.isFinite(Date.parse(draft.birthday))?new Date(Date.parse(draft.birthday)+8*3600000).toISOString().slice(0,16):"";
 const filtered=responses.filter(r=>`${r.name} ${r.message}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
 if(!session?.authenticated)return <main className={styles.loginPage}><div className={styles.loginCard}><span className={styles.loginLogo}>✳</span><p className={styles.overline}>УРИЛГЫН УДИРДЛАГА</p><h1>{session?.configured?"Тавтай морил ♡":"Админ эрхээ үүсгэе"}</h1><p className={styles.loginDescription}>{session===null?"Сервертэй холбогдож байна…":session.configured?"Нууц үгээ оруулаад урилгаа удирдаарай.":"Эхний удаа өөрийн нууц үгийг үүсгэнэ. Дараагийн удаа энэ нууц үгээрээ нэвтэрнэ."}</p><form onSubmit={async e=>{e.preventDefault();if(!session)return;if(!session.configured&&password!==confirmation){setError("Хоёр нууц үг ижил байна.");return;}setAuthBusy(true);setError("");try{setSession(await api("/api/admin/session",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:session.configured?"login":"setup",password})}));setPassword("");setConfirmation("");}catch(e){setError((e as Error).message);}finally{setAuthBusy(false);}}}>{session&&<><Field label="Нууц үг" value={password} onChange={setPassword} type="password" required hint="Хамгийн багадаа 8 тэмдэгт"/>{!session.configured&&<Field label="Нууц үг давтах" value={confirmation} onChange={setConfirmation} type="password" required/>}<button className={styles.primary} disabled={authBusy||password.length<8}>{authBusy?"Түр хүлээнэ үү…":session.configured?"Нэвтрэх →":"Нууц үг үүсгэж нэвтрэх →"}</button></>}</form>{error&&<p className={styles.error} role="alert">{error}</p>}{!session&&error&&<button onClick={()=>void loadSession()}>Дахин оролдох</button>}<span className={styles.loginFoot}>Зөвхөн урилгын эзэнд зориулав</span></div></main>;
-return <main className={styles.admin}><aside className={styles.sidebar}><div className={styles.brand}><span>✳</span><div>урилга<small>УДИРДЛАГЫН ХЭСЭГ</small></div></div><p className={styles.navLabel}>ТАНЫ УРИЛГА</p><nav aria-label="Админ цэс">{tabs.map(item=><button key={item.id} className={tab===item.id?styles.activeTab:""} onClick={()=>{setTab(item.id);setError("");setNotice("");contentRef.current?.scrollTo({top:0});}}><span className={styles.navIcon}>{item.icon}</span>{item.label}{item.id==="responses"&&<b>{responses.length}</b>}</button>)}</nav><div className={styles.sidebarBottom}><p>Жижиг өөрчлөлт.<br/><em>Онцгой дурсамж.</em></p><a href="/" target="_blank" rel="noopener noreferrer">Сайтыг харах ↗</a><button onClick={()=>void logout()}>Гарах</button></div></aside>
+return <main className={styles.admin}><aside className={styles.sidebar}><div className={styles.brand}><span>✳</span><div>урилга<small>УДИРДЛАГЫН ХЭСЭГ</small></div></div><p className={styles.navLabel}>ТАНЫ УРИЛГА</p><nav aria-label="Админ цэс">{tabs.map(item=><button key={item.id} aria-current={tab===item.id ? "page" : undefined} className={tab===item.id?styles.activeTab:""} onClick={()=>{setTab(item.id);setError("");setNotice("");contentRef.current?.scrollTo({top:0});}}><span className={styles.navIcon}>{item.icon}</span>{item.label}{item.id==="responses"&&<b>{responses.length}</b>}</button>)}</nav><div className={styles.sidebarBottom}><p>Жижиг өөрчлөлт.<br/><em>Онцгой дурсамж.</em></p><a href="/" target="_blank" rel="noopener noreferrer">Сайтыг харах ↗</a><button onClick={()=>void logout()}>Гарах</button></div></aside>
 <div className={styles.workspace}><header className={styles.topbar}><span>Миний төрсөн өдрийн урилга</span><div><span className={`${styles.saveState} ${dirty?styles.unsaved:""}`}>{uploads?"Файл байршуулж байна…":dirty?"Хадгалаагүй өөрчлөлттэй":"Бүх зүйл шинэчлэгдсэн"}</span>{tab!=="responses"&&<button type="button" className={styles.primary} onClick={()=>void save()} disabled={!document||!dirty||saving||uploads>0}>{saving?"Хадгалж байна…":"Өөрчлөлт хадгалах"}</button>}<button type="button" className={styles.mobileLogout} onClick={()=>void logout()}>Гарах</button></div></header>
+{saveProgress !== null && (!dirty || saving) && <div className="ua-saveProgress" role="status">
+  <div className="ua-progressLabel"><span>{saveProgress === 100 ? "Хадгалсан" : "Хадгалж байна…"}</span><strong>{saveProgress}%</strong></div>
+  <progress aria-label="Хадгалалтын явц" max={100} value={saveProgress} />
+</div>}
 <div className={styles.content} ref={contentRef}>{tab !== "home" && <div className={styles.pageHeading}><h1>{page.label}</h1><p>{page.subtitle}</p></div>}{error&&<div className={styles.error} role="alert">{error}</div>}{notice&&<div className={styles.success} role="status">✓ {notice}</div>}
 {loading?<div className={styles.empty}>Тохиргоог ачаалж байна…</div>:!document?<div className={styles.empty}><p>Тохиргоог ачаалж чадсангүй.</p><button onClick={()=>void loadSettings()}>Дахин ачаалах</button></div>:<>
 {tab==="home"&&<><div className={styles.stats}><div><span>ТӨРСӨН ӨДӨР</span><strong>{dateValue.slice(0,10).replaceAll("-",".")}</strong><small>Улаанбаатарын цагаар</small></div><div><span>ИРЭХ ЗОЧИД</span><strong>{responses.length}<em> хүн</em></strong><small>Урилга хүлээн авсан</small></div><div><span>ДУРСАМЖУУД</span><strong>{draft.gallery.photos.length}<em> зураг</em></strong><small>Зургийн цомогт</small></div></div><div className={styles.twoColumn}><Card title="Нүүр хуудасны зураг" description="Сайтад ороход бүтэн дэлгэцээр харагдах зураг."><ImagePreview src={draft.heroImage} label="Нүүр зураг" portrait/><FilePicker label="Зургийг солих" kind="image" onFiles={f=>update("heroImage",f[0].url)} {...uploadProps}/></Card><div className={styles.stack}><Card title="Төрсөн өдрийн огноо" description="Тоолуур энд оруулсан огноо, цаг хүртэл тоолно."><Field label="Огноо, цаг" type="datetime-local" value={dateValue} onChange={v=>update("birthday",v?`${v}:00+08:00`:"")} required hint="Улаанбаатарын цаг · UTC+08:00"/></Card><Card title="Сайтын дуу" description="Бүх хуудсанд үргэлжлэн тоглоно."><audio className={styles.audio} src={draft.music} controls preload="none"/><FilePicker label="Дуу оруулах" kind="audio" onFiles={f=>update("music",f[0].url)} {...uploadProps}/></Card></div></div></>}
@@ -116,6 +149,7 @@ return <main className={styles.admin}><aside className={styles.sidebar}><div cla
 </>}
 <p className={styles.contentFooter}>{document?.updatedAt?`Сүүлд хадгалсан: ${new Date(document.updatedAt).toLocaleString("mn-MN",{timeZone:"Asia/Ulaanbaatar"})}`:"Өөрчлөлтөө хадгалж урилгаа шинэчлээрэй."}</p></div></div></main>;
 }
+
 
 
 
