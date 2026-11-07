@@ -95,7 +95,11 @@ export default function MemoriesPage() {
   function open(index: number, button: HTMLButtonElement) { trigger.current = button; setSelected(index); }
   function close() { dialog.current?.close(); setSelected(null); trigger.current?.focus(); }
   function change(direction: number) { setSelected(index => index === null ? null : (index + direction + memories.length) % memories.length); }
+  const [viewerReady, setViewerReady] = useState<Record<string, boolean>>({});
   const current = selected === null ? null : memories[selected];
+  const viewerIndexes = current && selected !== null
+    ? [...new Set([selected, (selected + 1) % memories.length, (selected + memories.length - 1) % memories.length])]
+    : [];
   return <main className="album">
     <div className="shell">
       <header><button className="back" onClick={() => router.back()}>← <span>Буцах</span></button><span className="collection">THE MEMORY COLLECTION</span><span className="tiny-star" aria-hidden="true">✧</span></header>
@@ -162,7 +166,28 @@ export default function MemoriesPage() {
     </div>
     <dialog ref={dialog} aria-label="Зургийг томоор харах" onCancel={event=>{event.preventDefault();close();}} onKeyDown={event=>{if(event.key === "ArrowLeft")change(-1);if(event.key === "ArrowRight")change(1);}}>
       <div className="viewer-header"><span>{selected === null ? 0 : selected+1} / {memories.length}</span><button autoFocus aria-label="Зургийг хаах" onClick={close}>×</button></div>
-      <div className="full-photo" onTouchStart={event=>{touchX.current=event.changedTouches[0].clientX;}} onTouchEnd={event=>{if(touchX.current !== null){const distance=event.changedTouches[0].clientX-touchX.current;if(Math.abs(distance)>45)change(distance>0?-1:1);}touchX.current=null;}}>{current && <Image src={photoUrl(current.src, 1400)} alt={current.alt} fill sizes="100vw" unoptimized className="large-image"/>}</div>
+      <div className="full-photo"
+        onTouchStart={event => { touchX.current = event.changedTouches[0].clientX; }}
+        onTouchCancel={() => { touchX.current = null; }}
+        onTouchEnd={event => {
+          if (touchX.current === null) return;
+          const distance = event.changedTouches[0].clientX - touchX.current;
+          touchX.current = null;
+          if (Math.abs(distance) > 45) change(distance > 0 ? -1 : 1);
+        }}>
+        {current && !viewerReady[photoUrl(current.src, 900)] && (
+          <Image key={`preview-${current.src}`} src={photoUrl(current.src, 160)} alt="" fill sizes="100vw" unoptimized loading="eager" draggable={false} className="large-image" />
+        )}
+        {viewerIndexes.map(index => {
+          const photo = memories[index];
+          const src = photoUrl(photo.src, 900);
+          const visible = index === selected;
+          return <Image key={`${index}-${src}`} src={src} alt={visible ? photo.alt : ""}
+            fill sizes="100vw" unoptimized loading="eager" fetchPriority={visible ? "high" : "low"} draggable={false}
+            className="large-image" style={{ opacity: visible && viewerReady[src] ? 1 : 0, pointerEvents: "none" }}
+            onLoad={() => setViewerReady(loaded => loaded[src] ? loaded : { ...loaded, [src]: true })} />;
+        })}
+      </div>
       <div className="viewer-controls"><button aria-label="Өмнөх зураг" onClick={()=>change(-1)}>←</button><span>Дурсамж бүр үнэ цэнтэй ♡</span><button aria-label="Дараагийн зураг" onClick={()=>change(1)}>→</button></div>
     </dialog>
     <style jsx>{`
@@ -183,6 +208,7 @@ export default function MemoriesPage() {
     `}</style>
   </main>;
 }
+
 
 
 
