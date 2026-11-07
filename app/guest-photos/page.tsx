@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import GuestPhotoButton from "../guest-photo-button";
 import { useEffect, useRef, useState } from "react";
 
 type Photo = { id: string; url: string; createdAt: string };
@@ -43,6 +44,7 @@ export default function GuestPhotosPage() {
   const [notice, setNotice] = useState("");
   const [selected, setSelected] = useState<Photo | null>(null);
   const viewer = useRef<HTMLDialogElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -94,16 +96,15 @@ export default function GuestPhotosPage() {
   }
 
   return <main className="guest-album">
-    <header className="album-header"><Link href="/">← Нүүр хуудас</Link><span>{photos.length} зураг</span></header>
+    <header className="album-header"><Link href="/">← Буцах</Link><span>{photos.length} зураг</span></header>
     <section className="intro">
       <p className="eyebrow">БИДНИЙ ХАМТЫН ЦОМОГ</p>
       <h1>Зочдын <em>зургууд</em></h1>
       <p>Өөрийн авсан зургаа хуваалцаарай. Нэмсэн зургууд энэ цомогт бусад зочдод харагдана.</p>
-      <label className={`upload ${loading || progress ? "busy" : ""}`}>
-        <span aria-hidden="true">＋</span>{progress ? `Байршуулж байна… ${progress.done}/${progress.total}` : "Зураг оруулах"}
-        <input type="file" accept="image/*" multiple aria-label="Зураг оруулах" disabled={loading || !!progress}
-          onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ""; void upload(files); }} />
-      </label>
+      <input ref={picker} type="file" accept="image/*" multiple hidden disabled={loading || !!progress}
+        onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ""; void upload(files); }} />
+      <GuestPhotoButton disabled={loading || !!progress} onActivate={() => picker.current?.click()} />
+      {progress && <p role="status">Байршуулж байна… {progress.done}/{progress.total}</p>}
       {notice && <p role="status" className="notice">{notice}</p>}
       {error && <p role="alert" className="error">{error}</p>}
     </section>
@@ -116,15 +117,17 @@ export default function GuestPhotosPage() {
     ) : !error && <p className="empty">Одоогоор зураг ороогүй байна ♡</p>}
     <dialog ref={viewer} className="viewer" aria-label="Зургийг томоор харах" onClose={() => setSelected(null)}>
       <button type="button" onClick={() => viewer.current?.close()} aria-label="Зургийг хаах">×</button>
-      {selected && <Image src={selected.url} alt="Зочны оруулсан зураг" fill sizes="100vw" unoptimized loading="eager" />}
+      {selected && <><Image src={selected.url} alt="Зочны оруулсан зураг" fill sizes="100vw" unoptimized loading="eager" /><a className="download" href={`/api/guest-photos?download=${encodeURIComponent(selected.id)}`} download>↓ Зураг татах</a></>}
     </dialog>
     <style jsx>{`
       .guest-album{position:fixed;inset:0;height:100dvh;overflow-y:auto;padding:max(18px,env(safe-area-inset-top)) 20px max(28px,env(safe-area-inset-bottom));background:radial-gradient(ellipse at top,#512c44,#24101f 65%);color:#fce5f1;font-family:Manrope,Arial,sans-serif}
-      .album-header,.intro,.photos,.empty{max-width:480px;margin-left:auto;margin-right:auto}.album-header{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:12px;color:#dbabc4}.album-header :global(a){color:inherit;text-decoration:none;padding:10px 0}
+      .album-header,.intro,.photos,.empty{max-width:480px;margin-left:auto;margin-right:auto}.album-header{position:sticky;top:0;z-index:2;background:#311829;border-bottom:1px solid #e9acd139;border-radius:12px;padding:0 12px;display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:12px;color:#dbabc4}.album-header :global(a){color:inherit;text-decoration:none;padding:10px 0}
       .intro{text-align:center;padding:25px 0 20px}.intro .eyebrow{font-size:9px;letter-spacing:2px;color:#d1a0bc}.intro h1{font:400 30px/1.4 "Noto Serif",Georgia,serif;margin:11px 0}.intro em{color:#edb8d0}.intro p{font-size:12px;line-height:1.8;color:#d0adc2;margin:10px 0}
-      .upload{display:inline-flex;position:relative;align-items:center;gap:7px;min-height:46px;margin-top:10px;padding:0 20px;border:1px solid #f0b8d6;border-radius:14px;background:linear-gradient(135deg,#ad688f,#713759);color:white;font-size:13px;cursor:pointer}.upload input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}.upload:focus-within{outline:2px solid white;outline-offset:3px}.upload.busy{opacity:.65}.intro .notice{color:#f1c5dc}.intro .error{color:#ffc3cc;overflow-wrap:anywhere}
+      .download{position:absolute;z-index:1;bottom:max(22px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);padding:12px 18px;border-radius:12px;background:#5c3450;color:white;text-decoration:none;white-space:nowrap}
+      .intro .notice{color:#f1c5dc}.intro .error{color:#ffc3cc;overflow-wrap:anywhere}
       .photos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.photo{position:relative;aspect-ratio:1;overflow:hidden;border:1px solid #e9acd139;border-radius:15px;background:#4b263c;cursor:pointer}.photo :global(img){object-fit:cover}.empty{text-align:center;color:#cb9fb7;font-size:13px;padding:22px 0}
       .viewer{position:fixed;inset:0;width:100vw;height:100dvh;max-width:none;max-height:none;margin:0;border:0;background:#180b17}.viewer::backdrop{background:#180b17}.viewer :global(img){object-fit:contain}.viewer button{position:absolute;right:16px;top:max(14px,env(safe-area-inset-top));z-index:1;width:44px;height:44px;border-radius:50%;border:1px solid #e9acd166;background:#392035;color:white;font-size:25px;cursor:pointer}
     `}</style>
   </main>;
 }
+
