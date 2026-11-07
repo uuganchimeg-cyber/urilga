@@ -77,6 +77,17 @@ const ts=require('typescript');
     const guestAlbum = await (await guestPhotos.GET(request('/api/guest-photos'))).json();
     assert.equal(guestAlbum.length, 1);
     assert.match(guestAlbum[0].url, /^\/api\/media\/.+\.jpg$/);
+    const photoId = encodeURIComponent(guestAlbum[0].id);
+    const downloadUrl = '/api/guest-photos?download=' + photoId;
+    const photoDeleteUrl = '/api/guest-photos?id=' + photoId;
+    const download = await guestPhotos.GET(request(downloadUrl));
+    assert.equal(download.status, 200);
+    assert.match(download.headers.get('content-disposition'), /^attachment;/);
+    assert.deepEqual(Buffer.from(await download.arrayBuffer()), guestImage);
+    assert.equal((await guestPhotos.DELETE(request(photoDeleteUrl, 'DELETE'))).status, 401);
+    assert.equal((await guestPhotos.DELETE(request(photoDeleteUrl, 'DELETE', null, true))).status, 200);
+    assert.deepEqual(await (await guestPhotos.GET(request('/api/guest-photos'))).json(), []);
+    assert.equal((await guestPhotos.GET(request(downloadUrl))).status, 404);
     const invalid=new FormData();invalid.set('kind','image');invalid.set('file',new File(['<script>bad</script>'],'bad.jpg',{type:'image/jpeg'}));assert.equal((await upload.POST(request('/api/admin/upload','POST',invalid,true))).status,400);
     assert.equal((await session.DELETE(request('/api/admin/session','DELETE',null,true))).headers.get('set-cookie').includes('Max-Age=0'),true);
     console.log('PASS: authentication, validation, settings persistence, revision conflict, responses, public privacy, JPG/GIF/MP3 uploads and audio range requests.');
@@ -86,8 +97,3 @@ const ts=require('typescript');
     await fsp.rm(target,{recursive:true,force:true});
   }
 })().catch(error=>{console.error(error);process.exitCode=1;});
-
-
-
-
-
