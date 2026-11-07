@@ -52,6 +52,13 @@ const ts=require('typescript');
     const privateRows=await (await privateResponses.GET(request('/api/admin/responses','GET',null,true))).json();
     assert.equal(privateRows.length,3);assert.ok(privateRows.some(item=>item.id===row.id&&item.message===row.message));assert.ok(privateRows.some(item=>item.name===row.name&&item.message==='Шинэчилсэн сэтгэгдэл'));
     const publicRows=await (await comments.GET(request('/api/comments'))).json();assert.equal(publicRows.length,2);assert.equal('name' in publicRows[0],false);
+    const deleteUrl = `/api/admin/responses?id=${encodeURIComponent(row.id)}`;
+    assert.equal((await privateResponses.DELETE(request(deleteUrl, 'DELETE'))).status, 401);
+    assert.equal((await privateResponses.DELETE(request(deleteUrl, 'DELETE', null, true))).status, 200);
+    const remaining = await (await privateResponses.GET(request('/api/admin/responses', 'GET', null, true))).json();
+    assert.equal(remaining.length, 2);
+    assert.ok(!remaining.some(item => item.id === row.id));
+    assert.equal((await (await comments.GET(request('/api/comments'))).json()).length, 1);
     for(const [file,kind,type] of [['public/uugna.jpg','image','image/jpeg'],['fixture.mp3','audio','audio/mpeg'],['public/avla.gif','image','image/gif']]){
       const bytes=kind==="audio" ? Buffer.concat([Buffer.from("ID3"),Buffer.alloc(125)]) : await fsp.readFile(path.join(project,file));const form=new FormData();form.set('kind',kind);form.set('file',new File([bytes],path.basename(file),{type}));
       result=await upload.POST(request('/api/admin/upload','POST',form,true));assert.equal(result.status,200);const uploaded=await result.json();const filename=uploaded.url.split('/').pop();
@@ -67,6 +74,3 @@ const ts=require('typescript');
     await fsp.rm(target,{recursive:true,force:true});
   }
 })().catch(error=>{console.error(error);process.exitCode=1;});
-
-
-
