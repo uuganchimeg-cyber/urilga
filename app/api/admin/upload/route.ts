@@ -4,8 +4,8 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { json, requireAdmin } from "../../../lib/admin-auth";
 import { uploadDirectory } from "../../../lib/store";
-import { cloudEnabled } from "../../../lib/firebase-server";
-import { mediaExtension, uploadCloudMedia } from "../../../lib/cloudinary-server";
+import { cloudEnabled, firebaseNamespace } from "../../../lib/firebase-server";
+import { cloudinaryAccount, getCloudinary, mediaExtension, uploadCloudMedia } from "../../../lib/cloudinary-server";
 export async function POST(request:NextRequest){
   try {
     const denied=await requireAdmin(request);if(denied)return denied;
@@ -16,4 +16,31 @@ export async function POST(request:NextRequest){
     if(cloudEnabled()){const result=await uploadCloudMedia(data,kind);return json({url:result.secure_url,name:file.name});}
     await mkdir(uploadDirectory,{recursive:true});const filename=`${randomUUID()}.${extension}`;await writeFile(path.join(/* turbopackIgnore: true */ uploadDirectory,filename),data,{flag:"wx"});return json({url:`/api/media/${filename}`,name:file.name});
   }catch{return json({error:"Файлыг байршуулж чадсангүй. Серверийн холболтоо шалгана уу."},503);}
+}
+
+
+export async function GET(request: NextRequest) {
+  try {
+    const denied = await requireAdmin(request);
+    if (denied) return denied;
+    if (!cloudEnabled()) return json({ direct: false });
+    const account = cloudinaryAccount();
+    const fields = {
+      timestamp: Math.floor(Date.now() / 1000),
+      public_id: `urilga/${firebaseNamespace()}/audio-${randomUUID()}`,
+      allowed_formats: "mp3",
+      overwrite: false,
+    };
+    return json({
+      direct: true,
+      endpoint: `https://api.cloudinary.com/v1_1/${encodeURIComponent(account.cloud_name)}/video/upload`,
+      fields: {
+        ...fields,
+        api_key: account.api_key,
+        signature: getCloudinary().utils.api_sign_request(fields, account.api_secret),
+      },
+    });
+  } catch {
+    return json({ error: "Дуу байршуулах эрх бэлдэж чадсангүй. Серверийн тохиргоог шалгана уу." }, 503);
+  }
 }
