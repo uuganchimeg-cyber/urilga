@@ -70,7 +70,30 @@ const tabs:{id:Tab;label:string;icon:string;subtitle:string}[]=[
 {id:"gallery",label:"Дурсамжийн цомог",icon:"▧",subtitle:"Хамтдаа бүтээсэн мөчүүдээ хадгалаарай."},
 {id:"location",label:"Байршил, холбоос",icon:"⌖",subtitle:"Хаана уулзах, хэрхэн холбогдох мэдээлэл."},
 {id:"responses",label:"Ирц, сэтгэгдэл",icon:"☷",subtitle:"Найзуудын тань илгээсэн хариунууд."}];
-async function api<T>(url:string,init?:RequestInit):Promise<T>{const response=await fetch(url,{...init,cache:"no-store"});const data=await response.json();if(!response.ok)throw new Error(data.error||"Хүсэлт амжилтгүй боллоо.");return data;}
+async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, { ...init, cache: "no-store" });
+  const data = await response.json().catch(() => null);
+  if (response.status === 413) throw new Error("Файл серверийн зөвшөөрсөн хэмжээнээс их байна.");
+  if (!response.ok || !data) throw new Error(data?.error?.message || data?.error || "Хүсэлт амжилтгүй боллоо.");
+  return data;
+}
+
+async function uploadFile(file: File, kind: "image" | "audio") {
+  const form = new FormData();
+  form.set("file", file);
+  if (kind === "audio") {
+    if (!/\.mp3$/i.test(file.name)) throw new Error("MP3 файл сонгоно уу.");
+    const upload = await api<{ direct: false } | { direct: true; endpoint: string; fields: Record<string, string | number | boolean> }>("/api/admin/upload");
+    if (upload.direct) {
+      for (const [key, value] of Object.entries(upload.fields)) form.set(key, String(value));
+      const result = await api<{ secure_url?: string }>(upload.endpoint, { method: "POST", body: form });
+      if (!result.secure_url) throw new Error("Cloudinary дууны холбоос буцаасангүй.");
+      return { url: result.secure_url, name: file.name };
+    }
+  }
+  form.set("kind", kind);
+  return api<{ url: string; name: string }>("/api/admin/upload", { method: "POST", body: form });
+}
 function Field({label,value,onChange,hint,multiline=false,type="text",required=false}:{label:string;value:string;onChange:(value:string)=>void;hint?:string;multiline?:boolean;type?:string;required?:boolean}){return <label className={styles.field}><span>{label}{required&&<b> *</b>}</span>{multiline?<textarea rows={4} value={value} onChange={e=>onChange(e.target.value)} maxLength={10000} required={required}/>:<input type={type} value={value} onChange={e=>onChange(e.target.value)} required={required}/>}{hint&&<small>{hint}</small>}</label>;}
 function Card({title,description,children}:{title:string;description?:string;children:ReactNode}){return <section className={styles.card}><div className={styles.cardHeading}><h2>{title}</h2>{description&&<p>{description}</p>}</div>{children}</section>;}
 function FilePicker({ label, kind, onFiles, setBusy, onError, multiple = false, capacity }: {
@@ -111,10 +134,7 @@ function FilePicker({ label, kind, onFiles, setBusy, onError, multiple = false, 
             const file = files[index];
             try {
               if (file.size > 25 * 1024 * 1024) throw new Error("25MB-аас их хэмжээтэй");
-              const form = new FormData();
-              form.set("file", file);
-              form.set("kind", kind);
-              uploaded[index] = await api<{ url: string; name: string }>("/api/admin/upload", { method: "POST", body: form });
+              uploaded[index] = await uploadFile(file, kind);
             } catch (error) {
               failures.push(`${file.name} (${error instanceof Error ? error.message : "байршуулж чадсангүй"})`);
             } finally {
@@ -223,6 +243,7 @@ return <main className={styles.admin}><aside className={styles.sidebar}><div cla
 </>}
 <p className={styles.contentFooter}>{document?.updatedAt?`Сүүлд хадгалсан: ${new Date(document.updatedAt).toLocaleString("mn-MN",{timeZone:"Asia/Ulaanbaatar"})}`:"Өөрчлөлтөө хадгалж урилгаа шинэчлээрэй."}</p></div></div></main>;
 }
+
 
 
 
