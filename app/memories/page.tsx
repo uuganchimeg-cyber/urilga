@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useSiteSettings } from "../settings-context";
 
+function photoUrl(source: string, width: number) {
+  return /^https:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\//.test(source)
+    ? source.replace("/image/upload/", `/image/upload/c_limit,w_${width},q_auto,f_auto/`)
+    : source;
+}
+
 export default function MemoriesPage() {
   const router = useRouter();
   const settings = useSiteSettings();
@@ -15,7 +21,11 @@ export default function MemoriesPage() {
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const touchX = useRef<number | null>(null);
-  const running = playing && selected === null;
+  const running = playing && selected === null && memories.length > 1;
+  const ready = useRef(new Set<string>());
+  const activeIndex = active % Math.max(1, memories.length);
+  const nextIndex = (activeIndex + 1) % Math.max(1, memories.length);
+  const slides = [...new Set([activeIndex, nextIndex])].filter(index => memories[index]);
   useEffect(() => { setActive(0); setSelected(null); dialog.current?.close(); }, [memories]);
   useEffect(() => {
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -27,10 +37,13 @@ export default function MemoriesPage() {
   useEffect(() => {
     if (!running) return;
     const interval = setInterval(() => {
-      if (!document.hidden) setActive(index => (index + 1) % memories.length);
+      if (!document.hidden) setActive(index => {
+        const next = (index + 1) % memories.length;
+        return ready.current.has(memories[next].src) ? next : index;
+      });
     }, settings.gallery.intervalMs);
     return () => clearInterval(interval);
-  }, [running, settings.gallery.intervalMs, memories.length]);
+  }, [running, settings.gallery.intervalMs, memories]);
   useEffect(() => {
     if (selected !== null && dialog.current && !dialog.current.open) dialog.current.showModal();
   }, [selected]);
@@ -39,32 +52,49 @@ export default function MemoriesPage() {
   function change(direction: number) { setSelected(index => index === null ? null : (index + direction + memories.length) % memories.length); }
   const current = selected === null ? null : memories[selected];
   return <main className="album">
-    <div className="ambient" aria-hidden="true"><Image src={memories[active].src} alt="" fill sizes="100vw" unoptimized /></div>
     <div className="shell">
       <header><button className="back" onClick={() => router.back()}>← <span>Буцах</span></button><span className="collection">THE MEMORY COLLECTION</span><span className="tiny-star" aria-hidden="true">✧</span></header>
       <div className="heading"><p className="eyebrow"><span /> БИДНИЙ ҮЛДЭЭСЭН МӨЧҮҮД</p><h1>Дурсамжийн<br /><em>бяцхан ертөнц</em><span aria-hidden="true">♡</span></h1><p className="subtitle">Цаг хугацаа өнгөрөвч, дурсамж үлдэнэ.</p></div>
+      {memories.length ? <>
       <section className="gallery" aria-label="Автоматаар солигдох зургийн цомог" aria-roledescription="carousel">
         <div className="frame">
-          {memories.map((photo, index) => <button key={photo.src} className={`slide ${active === index ? "visible" : ""}`} tabIndex={active === index ? 0 : -1} aria-hidden={active !== index} aria-label={`${index + 1}-р зургийг томоор харах`} onClick={event => open(index, event.currentTarget)}>
-            <Image src={photo.src} alt={photo.alt} fill sizes="(max-width: 600px) 90vw, 430px" unoptimized className="hero-photo" loading={index === 0 ? "eager" : "lazy"} />
-          </button>)}
+          {slides.map(index => {
+            const photo = memories[index];
+            const visible = activeIndex === index;
+            return <button key={index} className={`slide ${visible ? "visible" : ""}`} tabIndex={visible ? 0 : -1} aria-hidden={!visible} aria-label={`${index + 1}-р зургийг томоор харах`} onClick={event => open(index, event.currentTarget)}>
+              <Image src={photoUrl(photo.src, 900)} alt={photo.alt} fill sizes="(max-width: 600px) 90vw, 430px" unoptimized loading="eager" className="hero-photo" onLoad={() => ready.current.add(photo.src)} onError={() => ready.current.add(photo.src)} />
+            </button>;
+          })}
           <div className="frame-shade" aria-hidden="true" />
 
           <div className="frame-caption"><span className="script">A little moment, a forever memory.</span><div className="caption-row"><span>Дурсамж бүр үнэ цэнтэй</span><span>♡</span></div></div>
         </div>
-        <div className="gallery-controls"><div className="counter"><strong>{String(active + 1).padStart(2, "0")}</strong><span> / {String(memories.length).padStart(2, "0")}</span></div><div className="progress" aria-hidden="true">{memories.map((photo,index)=><span key={photo.src} className={active === index ? "current" : ""}/>)}</div><button className="play" aria-label={playing ? "Автомат хөдөлгөөнийг зогсоох" : "Автомат хөдөлгөөнийг эхлүүлэх"} aria-pressed={playing} onClick={() => setPlaying(!playing)}>{playing ? <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 2v8m6-8v8" stroke="currentColor" strokeWidth="2"/></svg> : <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 1 8 5-8 5Z" fill="currentColor"/></svg>}</button></div>
+        <div className="gallery-controls"><div className="counter"><strong>{String(activeIndex + 1).padStart(2, "0")}</strong><span> / {String(memories.length).padStart(2, "0")}</span></div><div className="progress" aria-hidden="true">{memories.map((photo,index)=><span key={index} className={activeIndex === index ? "current" : ""}/>)}</div><button className="play" aria-label={playing ? "Автомат хөдөлгөөнийг зогсоох" : "Автомат хөдөлгөөнийг эхлүүлэх"} aria-pressed={playing} onClick={() => setPlaying(!playing)}>{playing ? <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 2v8m6-8v8" stroke="currentColor" strokeWidth="2"/></svg> : <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 1 8 5-8 5Z" fill="currentColor"/></svg>}</button></div>
       </section>
-      <div className="film-section"><div className="film-heading"><span>БҮХ ДУРСАМЖУУД</span><span>{memories.length} зураг</span></div><div className="film-window"><div className="film-track" style={{animationPlayState:running ? "running" : "paused",animationDuration:`${memories.length * 5}s`}}>
-        {[0,1].map(copy=><div className="film-group" key={copy} aria-hidden={copy === 1}>{memories.map((photo,index)=><button className={`film-photo ${active === index ? "chosen" : ""}`} key={photo.src} tabIndex={copy === 1 ? -1 : 0} aria-label={`${index+1}-р дурсамжийг үзэх`} onClick={event=>{setActive(index);open(index,event.currentTarget);}}><Image src={photo.src} alt={copy === 1 ? "" : photo.alt} fill sizes="90px" unoptimized className="thumbnail"/><span>{String(index+1).padStart(2,"0")}</span></button>)}</div>)}
-      </div></div></div>
+      <div className="film-section">
+        <div className="film-heading"><span>БҮХ ДУРСАМЖУУД</span><span>{memories.length} зураг</span></div>
+        <div className="film-window">
+          <div className="film-group">
+            {memories.map((photo, index) => <button className={`film-photo ${activeIndex === index ? "chosen" : ""}`} key={index} aria-label={`${index + 1}-р дурсамжийг үзэх`} onClick={event => { setActive(index); open(index, event.currentTarget); }}>
+              <Image src={photoUrl(photo.src, 160)} alt={photo.alt} fill sizes="90px" unoptimized loading="lazy" className="thumbnail" />
+              <span>{String(index + 1).padStart(2, "0")}</span>
+            </button>)}
+          </div>
+        </div>
+      </div>
+      </> : <p className="empty-album">Дурсамжийн зургууд удахгүй нэмэгдэнэ ♡</p>}
       <footer><span className="footer-line"/>Хамтдаа бүтээсэн дурсамжууд<span className="footer-line"/></footer>
     </div>
     <dialog ref={dialog} aria-label="Зургийг томоор харах" onCancel={event=>{event.preventDefault();close();}} onKeyDown={event=>{if(event.key === "ArrowLeft")change(-1);if(event.key === "ArrowRight")change(1);}}>
       <div className="viewer-header"><span>{selected === null ? 0 : selected+1} / {memories.length}</span><button autoFocus aria-label="Зургийг хаах" onClick={close}>×</button></div>
-      <div className="full-photo" onTouchStart={event=>{touchX.current=event.changedTouches[0].clientX;}} onTouchEnd={event=>{if(touchX.current !== null){const distance=event.changedTouches[0].clientX-touchX.current;if(Math.abs(distance)>45)change(distance>0?-1:1);}touchX.current=null;}}>{current && <Image src={current.src} alt={current.alt} fill sizes="100vw" unoptimized className="large-image"/>}</div>
+      <div className="full-photo" onTouchStart={event=>{touchX.current=event.changedTouches[0].clientX;}} onTouchEnd={event=>{if(touchX.current !== null){const distance=event.changedTouches[0].clientX-touchX.current;if(Math.abs(distance)>45)change(distance>0?-1:1);}touchX.current=null;}}>{current && <Image src={photoUrl(current.src, 1400)} alt={current.alt} fill sizes="100vw" unoptimized className="large-image"/>}</div>
       <div className="viewer-controls"><button aria-label="Өмнөх зураг" onClick={()=>change(-1)}>←</button><span>Дурсамж бүр үнэ цэнтэй ♡</span><button aria-label="Дараагийн зураг" onClick={()=>change(1)}>→</button></div>
     </dialog>
     <style jsx>{`
+      .empty-album{flex:1;display:grid;place-items:center;text-align:center;color:#eac3d8;font-size:13px}
+      .film-section .film-window{overflow-x:auto;margin:0;mask-image:none;scrollbar-width:thin}
+      .film-section .film-group{width:max-content}
+      .slide :global(.hero-photo){transform:none!important;transition:none!important}
       .album{position:fixed;inset:0;height:100dvh;overflow:hidden;background:#20111d;color:#fae9f1;font-family:Manrope,Arial,sans-serif}.ambient{position:absolute;inset:-60px;opacity:.16;filter:blur(65px);transform:scale(1.2);pointer-events:none}.ambient :global(img){object-fit:cover}.shell{position:relative;display:flex;flex-direction:column;gap:16px;height:100%;width:100%;max-width:470px;margin:auto;padding:max(16px,env(safe-area-inset-top)) 25px max(14px,env(safe-area-inset-bottom))}
       header{display:flex;align-items:center;justify-content:space-between;flex-shrink:0;height:28px}.back{display:flex;align-items:center;gap:7px;background:none;border:0;color:#e6c4d4;padding:6px 0;font-size:17px}.back span{font-size:10px}.collection{font-size:7px;letter-spacing:1.8px;color:#ae8e9f}.tiny-star{font-size:24px;color:#e5b0c9}.heading{position:relative;flex-shrink:0;padding-top:6px}.eyebrow{display:flex;align-items:center;gap:8px;font-size:7px;letter-spacing:2px;color:#d3a6bc;margin:0 0 12px}.eyebrow>span{width:17px;height:1px;background:#bf829f}h1{font-family:"Noto Serif",Georgia,serif;font-size:32px;font-weight:400;line-height:1.28;letter-spacing:-1px;margin:0}h1 em{color:#edb8cf;font-weight:400}h1>span{position:absolute;right:8px;top:40px;color:#d99db9;font-family:Georgia,serif;font-size:43px;transform:rotate(13deg)}.subtitle{color:#b59aa9;font-size:9px;margin:12px 0 0;letter-spacing:.2px}
       .gallery{display:flex;flex-direction:column;flex:1;min-height:0;gap:13px}.frame{position:relative;flex:1;min-height:0;border-radius:100px 100px 18px 18px;overflow:hidden;border:1px solid #f5d1df55;background:#512b40;box-shadow:0 14px 36px #0c060d44}.slide{position:absolute;inset:0;border:0;padding:0;background:transparent;opacity:0;pointer-events:none;transition:opacity .45s ease;overflow:hidden}.slide.visible{opacity:1;pointer-events:auto}.slide :global(.hero-photo){object-fit:cover;transform:scale(1.025);transition:transform 5s linear}.slide.visible :global(.hero-photo){transform:scale(1.09)}.frame-shade{position:absolute;inset:0;background:linear-gradient(#1e101e22,transparent 40%,#160b16cc);pointer-events:none}.frame-top{position:absolute;top:28px;left:25px;right:25px;display:flex;justify-content:space-between;align-items:center;pointer-events:none}.moment{font-size:7px;letter-spacing:2px;color:#fff5fa;text-shadow:0 1px 6px #000}.expand{background:#ffffff15;border:1px solid #ffffff44;backdrop-filter:blur(8px);width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-size:18px}.frame-caption{position:absolute;bottom:20px;left:22px;right:22px;pointer-events:none}.script{display:block;font-family:"Noto Serif",Georgia,serif;font-style:italic;font-size:12px;color:#ffe6ef}.caption-row{display:flex;justify-content:space-between;align-items:center;margin-top:9px;font-size:8px;letter-spacing:.8px;color:#ecd0de}.caption-row>span:last-child{font-size:22px}.gallery-controls{display:flex;align-items:center;gap:17px;flex-shrink:0;height:28px}.counter{white-space:nowrap;font-size:10px}.counter strong{font-size:17px;font-weight:500}.counter>span{color:#a98498;font-size:9px;margin-left:3px}.progress{display:flex;gap:4px;align-items:center;flex:1;min-width:0;overflow:hidden}.progress>span{height:2px;flex:1;background:#ffffff18;min-width:2px;border-radius:3px;transition:background .5s}.progress>.current{background:#edb2cf;box-shadow:0 0 8px #efacc055}.play{display:grid;place-items:center;width:29px;height:29px;border:1px solid #edbfda3d;border-radius:50%;background:#ffffff05;color:#e4bdd1}
@@ -77,6 +107,7 @@ export default function MemoriesPage() {
     `}</style>
   </main>;
 }
+
 
 
 
