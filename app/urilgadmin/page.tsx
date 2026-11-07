@@ -73,8 +73,67 @@ const tabs:{id:Tab;label:string;icon:string;subtitle:string}[]=[
 async function api<T>(url:string,init?:RequestInit):Promise<T>{const response=await fetch(url,{...init,cache:"no-store"});const data=await response.json();if(!response.ok)throw new Error(data.error||"Хүсэлт амжилтгүй боллоо.");return data;}
 function Field({label,value,onChange,hint,multiline=false,type="text",required=false}:{label:string;value:string;onChange:(value:string)=>void;hint?:string;multiline?:boolean;type?:string;required?:boolean}){return <label className={styles.field}><span>{label}{required&&<b> *</b>}</span>{multiline?<textarea rows={4} value={value} onChange={e=>onChange(e.target.value)} maxLength={10000} required={required}/>:<input type={type} value={value} onChange={e=>onChange(e.target.value)} required={required}/>}{hint&&<small>{hint}</small>}</label>;}
 function Card({title,description,children}:{title:string;description?:string;children:ReactNode}){return <section className={styles.card}><div className={styles.cardHeading}><h2>{title}</h2>{description&&<p>{description}</p>}</div>{children}</section>;}
-function FilePicker({label,kind,onFiles,setBusy,onError,multiple=false}:{label:string;kind:"image"|"audio";onFiles:(files:{url:string;name:string}[])=>void;setBusy:(change:number)=>void;onError:(message:string)=>void;multiple?:boolean}){
-const [uploading,setUploading]=useState(false);return <label className={`${styles.upload} ${uploading?styles.uploading:""}`}><span className={styles.uploadIcon}>↑</span><span><strong>{uploading?"Байршуулж байна…":label}</strong><small>{kind==="audio"?"MP3":"JPG, PNG, WEBP, GIF"} · Файл бүр 25MB хүртэл</small></span><input type="file" accept={kind==="audio"?"audio/mpeg,.mp3":"image/jpeg,image/png,image/webp,image/gif"} multiple={multiple} disabled={uploading} onChange={async e=>{const files=Array.from(e.target.files||[]);e.target.value="";if(!files.length)return;if(files.some(f=>f.size>25*1024*1024)){onError("Файл бүр 25MB-аас бага байна.");return;}setUploading(true);setBusy(1);try{const uploaded=[];for(const file of files){const form=new FormData();form.set("file",file);form.set("kind",kind);uploaded.push(await api<{url:string;name:string}>("/api/admin/upload",{method:"POST",body:form}));}onFiles(uploaded);}catch(error){onError((error as Error).message);}finally{setUploading(false);setBusy(-1);}}}/></label>;}
+function FilePicker({ label, kind, onFiles, setBusy, onError, multiple = false, capacity }: {
+  label: string;
+  kind: "image" | "audio";
+  onFiles: (files: { url: string; name: string }[]) => void;
+  setBusy: (change: number) => void;
+  onError: (message: string) => void;
+  multiple?: boolean;
+  capacity?: number;
+}) {
+  const [progress, setProgress] = useState<{ completed: number; total: number } | null>(null);
+  const uploading = progress !== null;
+  return <label className={`${styles.upload} ${uploading ? styles.uploading : ""}`}>
+    <span className={styles.uploadIcon}>↑</span>
+    <span>
+      <strong aria-live="polite">{progress ? `Байршуулж байна… ${progress.completed}/${progress.total}` : label}</strong>
+      <small>{kind === "audio" ? "MP3" : "JPG, PNG, WEBP, GIF"} · Файл бүр 25MB хүртэл</small>
+    </span>
+    <input type="file" accept={kind === "audio" ? "audio/mpeg,.mp3" : "image/jpeg,image/png,image/webp,image/gif"}
+      multiple={multiple} disabled={uploading || capacity === 0} onChange={async event => {
+        const files = Array.from(event.currentTarget.files ?? []);
+        event.currentTarget.value = "";
+        if (!files.length) return;
+        onError("");
+        if (capacity !== undefined && files.length > capacity) {
+          onError(`Цомогт нэмж ${capacity} хүртэл зураг оруулж болно. Сонголтоо багасгана уу.`);
+          return;
+        }
+        setProgress({ completed: 0, total: files.length });
+        setBusy(1);
+        const uploaded: ({ url: string; name: string } | undefined)[] = [];
+        const failures: string[] = [];
+        let nextIndex = 0;
+        async function uploadNext() {
+          while (nextIndex < files.length) {
+            const index = nextIndex++;
+            const file = files[index];
+            try {
+              if (file.size > 25 * 1024 * 1024) throw new Error("25MB-аас их хэмжээтэй");
+              const form = new FormData();
+              form.set("file", file);
+              form.set("kind", kind);
+              uploaded[index] = await api<{ url: string; name: string }>("/api/admin/upload", { method: "POST", body: form });
+            } catch (error) {
+              failures.push(`${file.name} (${error instanceof Error ? error.message : "байршуулж чадсангүй"})`);
+            } finally {
+              setProgress(previous => previous && { ...previous, completed: previous.completed + 1 });
+            }
+          }
+        }
+        try {
+          await Promise.all(Array.from({ length: Math.min(files.length, 3) }, uploadNext));
+          const successful = uploaded.filter(file => file !== undefined);
+          if (successful.length) onFiles(successful);
+          if (failures.length) onError(`Оруулж чадсангүй (${failures.length}). ${failures.join(" · ")}`);
+        } finally {
+          setProgress(null);
+          setBusy(-1);
+        }
+      }} />
+  </label>;
+}
 function ImagePreview({src,label,portrait=false}:{src:string;label:string;portrait?:boolean}){return <div className={`${styles.imagePreview} ${portrait?styles.portrait:""}`}><Image src={src} alt={label} fill sizes="400px" unoptimized/></div>;}
 export default function AdminPage(){
 const [session,setSession]=useState<{configured:boolean;authenticated:boolean}|null>(null);
@@ -143,12 +202,13 @@ return <main className={styles.admin}><aside className={styles.sidebar}><div cla
 {tab==="home"&&<><div className={styles.stats}><div><span>ТӨРСӨН ӨДӨР</span><strong>{dateValue.slice(0,10).replaceAll("-",".")}</strong><small>Улаанбаатарын цагаар</small></div><div><span>ИРЭХ ЗОЧИД</span><strong>{responses.length}<em> хүн</em></strong><small>Урилга хүлээн авсан</small></div><div><span>ДУРСАМЖУУД</span><strong>{draft.gallery.photos.length}<em> зураг</em></strong><small>Зургийн цомогт</small></div></div><div className={styles.twoColumn}><Card title="Нүүр хуудасны зураг" description="Сайтад ороход бүтэн дэлгэцээр харагдах зураг."><ImagePreview src={draft.heroImage} label="Нүүр зураг" portrait/><FilePicker label="Зургийг солих" kind="image" onFiles={f=>update("heroImage",f[0].url)} {...uploadProps}/></Card><div className={styles.stack}><Card title="Төрсөн өдрийн огноо" description="Тоолуур энд оруулсан огноо, цаг хүртэл тоолно."><Field label="Огноо, цаг" type="datetime-local" value={dateValue} onChange={v=>update("birthday",v?`${v}:00+08:00`:"")} required hint="Улаанбаатарын цаг · UTC+08:00"/></Card><Card title="Сайтын дуу" description="Бүх хуудсанд үргэлжлэн тоглоно."><audio className={styles.audio} src={draft.music} controls preload="none"/><FilePicker label="Дуу оруулах" kind="audio" onFiles={f=>update("music",f[0].url)} {...uploadProps}/></Card></div></div></>}
 {tab==="invitation"&&<div className={styles.editorColumn}><Card title="Найзууддаа хүргэх үгс" description="Текстийн дараалал, урилгын одоогийн загвар хэвээр хадгалагдана."><div className={styles.fields}><Field label="Жижиг гарчиг" value={draft.invitation.eyebrow} onChange={v=>updateInvitation("eyebrow",v)}/><Field label="Үндсэн гарчиг" value={draft.invitation.title} onChange={v=>updateInvitation("title",v)} required/><Field label="Урилгын үгс" multiline value={draft.invitation.body} onChange={v=>updateInvitation("body",v)} required/><Field label="Төгсгөлийн үгс" multiline value={draft.invitation.closing} onChange={v=>updateInvitation("closing",v)}/></div></Card></div>}
 {tab==="accepted"&&<div className={styles.twoColumn}><Card title="Хүлээн авсны дараах зураг" description="GIF оруулбал хөдөлгөөнтэй харагдана."><ImagePreview src={draft.accepted.image} label="Талархлын GIF"/><FilePicker label="GIF эсвэл зураг солих" kind="image" onFiles={f=>updateAccepted("image",f[0].url)} {...uploadProps}/></Card><Card title="Талархлын зурвас" description="Зочин хариугаа илгээсний дараа GIF-ийн доор гарна."><div className={styles.fields}><Field label="Талархлын текст" multiline value={draft.accepted.message} onChange={v=>updateAccepted("message",v)}/><Field label="Emoji" value={draft.accepted.emojis} onChange={v=>updateAccepted("emojis",v)}/><div className={styles.messagePreview}><p>{draft.accepted.message}</p><span>{draft.accepted.emojis}</span></div></div></Card></div>}
-{tab==="gallery"&&<><Card title="Дурсамжийн зургийн цомог" description="Олон зураг зэрэг сонгож болно. Нэмсэн зургууд цомогт автоматаар солигдоно."><div className={styles.galleryTop}><FilePicker label="Зургууд нэмэх" kind="image" multiple onFiles={files=>setDraft(old=>({...old,gallery:{...old.gallery,photos:[...old.gallery.photos,...files.map(f=>({src:f.url,alt:f.name.replace(/\.[^.]+$/,"")}))]}}))} {...uploadProps}/><Field label="Солигдох хугацаа (секунд)" type="number" value={String(draft.gallery.intervalMs/1000)} onChange={v=>setDraft(old=>({...old,gallery:{...old.gallery,intervalMs:Number(v)*1000}}))} hint="1–30 секунд"/></div><p className={styles.muted}>{draft.gallery.photos.length} / 200 зураг · Сумнуудаар дарааллыг солино.</p></Card><div className={styles.photoGrid}>{draft.gallery.photos.map((photo,index)=><section key={photo.src+index} className={styles.photoCard}><div className={styles.photoImage}><Image src={photo.src} alt={photo.alt} fill sizes="240px" unoptimized/><span>{String(index+1).padStart(2,"0")}</span></div><div className={styles.photoBody}><Field label="Зургийн тайлбар" value={photo.alt} onChange={v=>setDraft(old=>({...old,gallery:{...old.gallery,photos:old.gallery.photos.map((item,i)=>i===index?{...item,alt:v}:item)}}))}/><div className={styles.photoActions}><button aria-label={`${index+1}-р зургийг урагшлуулах`} disabled={index===0} onClick={()=>setDraft(old=>{const photos=[...old.gallery.photos];[photos[index-1],photos[index]]=[photos[index],photos[index-1]];return{...old,gallery:{...old.gallery,photos}};})}>←</button><button aria-label={`${index+1}-р зургийг хойшлуулах`} disabled={index===draft.gallery.photos.length-1} onClick={()=>setDraft(old=>{const photos=[...old.gallery.photos];[photos[index+1],photos[index]]=[photos[index],photos[index+1]];return{...old,gallery:{...old.gallery,photos}};})}>→</button><button className={styles.remove} disabled={draft.gallery.photos.length===1} onClick={()=>setDraft(old=>({...old,gallery:{...old.gallery,photos:old.gallery.photos.filter((_,i)=>i!==index)}}))}>Хасах</button></div></div></section>)}</div></>}
+{tab==="gallery"&&<><Card title="Дурсамжийн зургийн цомог" description="Олон зураг зэрэг сонгож болно. Нэмсэн зургууд цомогт автоматаар солигдоно."><div className={styles.galleryTop}><FilePicker label="Олон зураг сонгох" kind="image" multiple capacity={Math.max(0, 200 - draft.gallery.photos.length)} onFiles={files=>setDraft(old=>({...old,gallery:{...old.gallery,photos:[...old.gallery.photos,...files.map(f=>({src:f.url,alt:f.name.replace(/\.[^.]+$/,"")}))]}}))} {...uploadProps}/><Field label="Солигдох хугацаа (секунд)" type="number" value={String(draft.gallery.intervalMs/1000)} onChange={v=>setDraft(old=>({...old,gallery:{...old.gallery,intervalMs:Number(v)*1000}}))} hint="1–30 секунд"/></div><p className={styles.muted}>{draft.gallery.photos.length} / 200 зураг · Сумнуудаар дарааллыг солино.</p></Card><div className={styles.photoGrid}>{draft.gallery.photos.map((photo,index)=><section key={photo.src+index} className={styles.photoCard}><div className={styles.photoImage}><Image src={photo.src} alt={photo.alt} fill sizes="240px" unoptimized/><span>{String(index+1).padStart(2,"0")}</span></div><div className={styles.photoBody}><Field label="Зургийн тайлбар" value={photo.alt} onChange={v=>setDraft(old=>({...old,gallery:{...old.gallery,photos:old.gallery.photos.map((item,i)=>i===index?{...item,alt:v}:item)}}))}/><div className={styles.photoActions}><button aria-label={`${index+1}-р зургийг урагшлуулах`} disabled={index===0} onClick={()=>setDraft(old=>{const photos=[...old.gallery.photos];[photos[index-1],photos[index]]=[photos[index],photos[index-1]];return{...old,gallery:{...old.gallery,photos}};})}>←</button><button aria-label={`${index+1}-р зургийг хойшлуулах`} disabled={index===draft.gallery.photos.length-1} onClick={()=>setDraft(old=>{const photos=[...old.gallery.photos];[photos[index+1],photos[index]]=[photos[index],photos[index+1]];return{...old,gallery:{...old.gallery,photos}};})}>→</button><button className={styles.remove} disabled={draft.gallery.photos.length===1} onClick={()=>setDraft(old=>({...old,gallery:{...old.gallery,photos:old.gallery.photos.filter((_,i)=>i!==index)}}))}>Хасах</button></div></div></section>)}</div></>}
 {tab==="location"&&<div className={styles.stack}><Card title="Газрын мэдээлэл" description="Баяр болох газар болон дэлгэрэнгүй хаяг."><div className={styles.fields}><div className={styles.fieldRow}><Field label="Газрын нэр" value={draft.venue.name} onChange={v=>updateVenue("name",v)}/><Field label="Дэлгэрэнгүй хаяг" value={draft.venue.address} onChange={v=>updateVenue("address",v)}/></div><Field label="Нэмэлт тайлбар" multiline value={draft.venue.description} onChange={v=>updateVenue("description",v)}/></div></Card><Card title="Google Maps" description="Хайх хаяг эсвэл координат оруулна. Яг байршлын embed холбоос байвал нэмэлтээр оруулж болно."><div className={styles.fields}><Field label="Maps дээр хайх хаяг / координат" value={draft.venue.mapQuery} onChange={v=>updateVenue("mapQuery",v)} hint="Жишээ: амралтын газрын нэр эсвэл 47.1234, 106.1234"/><Field label="Газрын зураг суулгах холбоос (заавал биш)" value={draft.venue.mapEmbedUrl} onChange={v=>updateVenue("mapEmbedUrl",v.match(/src=["']([^"']+)["']/)?.[1]||v)} hint="Google Maps → Share → Embed a map → iframe-ийн src холбоос"/><Field label="Google Maps нээх холбоос (заавал биш)" value={draft.venue.mapLink} onChange={v=>updateVenue("mapLink",v)} hint="Google Maps-ийн хуваалцах холбоос"/><label className={styles.check}><input type="checkbox" checked={draft.venue.exactLocation} onChange={e=>updateVenue("exactLocation",e.target.checked)}/> Газрын зурагт яг байршлыг оруулсан</label></div></Card><Card title="Холбогдох мэдээлэл"><div className={styles.fields}><div className={styles.fieldRow}><Field label="Холбогдох хүний нэр" value={draft.venue.contactName} onChange={v=>updateVenue("contactName",v)}/><Field label="Утасны дугаар" type="tel" value={draft.venue.phone} onChange={v=>updateVenue("phone",v)}/></div><div className={styles.fieldRow}><Field label="Facebook" value={draft.venue.facebook} onChange={v=>updateVenue("facebook",v)} hint="Хэрэглэгчийн нэр эсвэл https://facebook.com/…"/><Field label="Instagram" value={draft.venue.instagram} onChange={v=>updateVenue("instagram",v)} hint="Хэрэглэгчийн нэр эсвэл https://instagram.com/…"/></div></div></Card></div>}
 {tab==="responses"&&<><div className={styles.stats}><div><span>УРИЛГА ХҮЛЭЭН АВСАН</span><strong>{responses.length}<em> хүн</em></strong></div><div><span>СЭТГЭГДЭЛ ҮЛДЭЭСЭН</span><strong>{responses.filter(r=>r.message).length}<em> хүн</em></strong></div><div><span>ШИНЭЧЛЭЛТ</span><strong className={styles.statSmall}>15 секунд</strong><small>Автоматаар шинэчлэгдэнэ</small></div></div><Card title="Зочдын хариу" description="Нэр болон сэтгэгдэл серверт хадгалагдана. Сэтгэгдэлгүй хариу ч энд харагдана."><div className={styles.responseToolbar}><input aria-label="Нэр, сэтгэгдлээр хайх" placeholder="Нэр, сэтгэгдлээр хайх…" value={search} onChange={e=>setSearch(e.target.value)}/><button className={styles.secondary} onClick={()=>void loadResponses()} disabled={responsesLoading}>{responsesLoading?"Ачаалж байна…":"Шинэчлэх"}</button><button className={styles.secondary} onClick={exportResponses} disabled={!responses.length}>CSV татах ↓</button></div>{filtered.length?<div className={styles.tableWrap}><table><thead><tr><th>Зочин</th><th>Сэтгэгдэл</th><th>Илгээсэн огноо</th></tr></thead><tbody>{filtered.map(r=><tr key={r.id}><td><strong>{r.name}</strong><span className={styles.acceptedBadge}>✓ Хүлээн авсан</span></td><td className={styles.commentCell}>{r.message||<span className={styles.muted}>Сэтгэгдэл бичээгүй</span>}</td><td className={styles.dateCell}>{new Date(r.createdAt).toLocaleString("mn-MN",{timeZone:"Asia/Ulaanbaatar"})}</td></tr>)}</tbody></table></div>:<div className={styles.empty}><span>♡</span><h3>{search?"Илэрц олдсонгүй":"Хариунууд энд цугларна"}</h3><p>{search?"Хайлтын үгээ өөрчилж үзээрэй.":"Зочин урилгаа хүлээн авахад нэр, сэтгэгдэл нь энд гарна."}</p></div>}</Card></>}
 </>}
 <p className={styles.contentFooter}>{document?.updatedAt?`Сүүлд хадгалсан: ${new Date(document.updatedAt).toLocaleString("mn-MN",{timeZone:"Asia/Ulaanbaatar"})}`:"Өөрчлөлтөө хадгалж урилгаа шинэчлээрэй."}</p></div></div></main>;
 }
+
 
 
 
